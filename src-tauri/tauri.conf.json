@@ -44,7 +44,7 @@
     "updater": {
       "active": true,
       "endpoints": [
-        "https://github.com/mrtayyem/vpn-desktop/releases/latest/download/latest.json"
+        "https://github.com/tayyemibraheem/vpn-desktop/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"
