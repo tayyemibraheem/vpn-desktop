@@ -10,6 +10,9 @@ export default function SplitTunnelingPage({ connected }) {
   const [appPickerOpen, setAppPickerOpen] = useState(false);
   const [newDestination, setNewDestination] = useState('');
   const [saving, setSaving] = useState(false);
+  const [pickerLoading, setPickerLoading] = useState(false);
+  const [pickerError, setPickerError] = useState(null);
+  const [saveError, setSaveError] = useState(null);
 
   useEffect(() => {
     api.getSplitTunnelConfig().then((cfg) => {
@@ -20,8 +23,14 @@ export default function SplitTunnelingPage({ connected }) {
 
   async function persist(nextApps, nextDestinations) {
     setSaving(true);
-    await api.setSplitTunnelConfig({ apps: nextApps, destinations: nextDestinations });
-    setSaving(false);
+    setSaveError(null);
+    try {
+      await api.setSplitTunnelConfig({ apps: nextApps, destinations: nextDestinations });
+    } catch (err) {
+      setSaveError(err?.message || String(err));
+    } finally {
+      setSaving(false);
+    }
   }
 
   function removeApp(name) {
@@ -32,8 +41,16 @@ export default function SplitTunnelingPage({ connected }) {
 
   async function openAppPicker() {
     setAppPickerOpen(true);
-    const list = await api.listCandidateApps();
-    setCandidateApps(list.filter((c) => !apps.includes(c.name)));
+    setPickerLoading(true);
+    setPickerError(null);
+    try {
+      const list = await api.listCandidateApps();
+      setCandidateApps(list.filter((c) => !apps.includes(c.name)));
+    } catch (err) {
+      setPickerError(err?.message || String(err));
+    } finally {
+      setPickerLoading(false);
+    }
   }
 
   function addApp(name) {
@@ -87,7 +104,9 @@ export default function SplitTunnelingPage({ connected }) {
               <button className="btn btn-ghost" onClick={openAppPicker}>+ Add Application</button>
             ) : (
               <div className="list" style={{ maxHeight: 220, overflowY: 'auto' }}>
-                {candidateApps.length === 0 && <p className="empty-hint">No other running apps found.</p>}
+                {pickerLoading && <p className="empty-hint">Loading running apps…</p>}
+                {pickerError && <p className="error-text">{pickerError}</p>}
+                {!pickerLoading && !pickerError && candidateApps.length === 0 && <p className="empty-hint">No other running apps found.</p>}
                 {candidateApps.map((c) => (
                   <div className="list-row pickable" key={c.name} onClick={() => addApp(c.name)}>
                     <span>{c.name}</span>
@@ -122,6 +141,7 @@ export default function SplitTunnelingPage({ connected }) {
           </div>
         )}
 
+        {saveError && <p className="error-text">{saveError}</p>}
         <p className="empty-hint">
           {connected ? (saving ? 'Applying…' : 'Changes apply immediately while connected.') : 'Changes take effect on your next connect.'}
         </p>

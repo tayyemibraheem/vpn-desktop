@@ -23,6 +23,7 @@ export default function HomePage({ session, status }) {
   const [connectedAt, setConnectedAt] = useState(null);
   const [elapsed, setElapsed] = useState(0);
   const [splitApps, setSplitApps] = useState([]);
+  const [connectError, setConnectError] = useState(null);
 
   useEffect(() => {
     if (status.state === 'connected' && !connectedAt) {
@@ -47,12 +48,18 @@ export default function HomePage({ session, status }) {
 
   async function toggleConnection() {
     setBusy(true);
+    setConnectError(null);
     try {
       if (status.state === 'disconnected') {
-        await api.connect(session.username, session.password);
+        const result = await api.connect(session.username, session.password);
+        if (!result?.ok) {
+          setConnectError(result?.error || 'Failed to connect');
+        }
       } else {
         await api.disconnect();
       }
+    } catch (err) {
+      setConnectError(err?.message || String(err));
     } finally {
       setBusy(false);
     }
@@ -107,6 +114,7 @@ export default function HomePage({ session, status }) {
               >
                 {status.state === 'connected' ? 'Disconnect' : status.state === 'connecting' ? 'Connecting…' : 'Connect'}
               </button>
+              {connectError && <p className="error-text">{connectError}</p>}
             </div>
 
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
