@@ -12,4 +12,22 @@
       </requestedPrivileges>
     </security>
   </trustInfo>
+  <!--
+    A custom manifest REPLACES Tauri's default one entirely rather than merging with it, and
+    Tauri's default includes this same dependency — without it, Windows loads the ancient v5
+    Common Controls DLL instead of v6, which is missing APIs (TaskDialogIndirect and others)
+    that Tauri/WebView2 rely on, crashing on launch with "Entry Point Not Found".
+  -->
+  <dependency>
+    <dependentAssembly>
+      <assemblyIdentity
+        type="win32"
+        name="Microsoft.Windows.Common-Controls"
+        version="6.0.0.0"
+        processorArchitecture="*"
+        publicKeyToken="6595b64144ccf1df"
+        language="*"
+      />
+    </dependentAssembly>
+  </dependency>
 </assembly>
