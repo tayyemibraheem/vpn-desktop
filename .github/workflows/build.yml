@@ -47,12 +47,24 @@ jobs:
       - name: Install npm dependencies
         run: npm ci
 
-      # On a plain push/PR (no tag), this just proves the app still builds — no GitHub
-      # Release, no updater signing, since TAURI_SIGNING_PRIVATE_KEY is only used by the
-      # tauri-action release step below.
+      # On a plain push/PR (no tag), this proves the app still builds and produces a
+      # downloadable (but not GitHub-Release-published) installer. Tauri still needs the
+      # signing key here too, even though nothing gets published — once a pubkey is set in
+      # tauri.conf.json, `tauri build` tries to sign the updater artifact unconditionally,
+      # regardless of which workflow step invoked it.
       - name: Build (sanity check)
         if: ${{ !startsWith(github.ref, 'refs/tags/app-v') }}
         run: npm run tauri build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+
+      - name: Upload installer artifact (sanity-check builds)
+        if: ${{ !startsWith(github.ref, 'refs/tags/app-v') }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: installer
+          path: src-tauri/target/release/bundle/nsis/*.exe
 
       # On an "app-vX.Y.Z" tag: build, sign (needs the two secrets below set in the repo's
       # Settings > Secrets), and publish a GitHub Release with the installer + updater manifest
