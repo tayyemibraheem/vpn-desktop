@@ -10,6 +10,9 @@ on:
     branches: [main]
   workflow_dispatch: {}
 
+permissions:
+  contents: write # needed for the tag-triggered step to create a GitHub Release
+
 jobs:
   build:
     runs-on: windows-latest
