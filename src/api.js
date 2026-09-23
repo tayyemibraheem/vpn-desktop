@@ -4,7 +4,6 @@ import { listen } from '@tauri-apps/api/event';
 export const api = {
   login: (usernameOrEmail, password) => invoke('auth_login', { usernameOrEmail, password }),
   logout: () => invoke('auth_logout'),
-  restoreSession: () => invoke('auth_restore_session'),
 
   connect: (username, password) => invoke('vpn_connect', { username, password }),
   disconnect: () => invoke('vpn_disconnect'),

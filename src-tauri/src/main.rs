@@ -5,7 +5,6 @@ mod ovpn;
 mod split_tunnel;
 mod store;
 
-use serde::{Deserialize, Serialize};
 use split_tunnel::app_tunnel::{list_candidate_apps, AppTunnel, CandidateApp};
 use split_tunnel::destination_routes;
 use std::sync::{Arc, Mutex};
@@ -15,12 +14,6 @@ struct AppState {
     data: Mutex<store::AppData>,
     ovpn: Arc<ovpn::OvpnClient>,
     app_tunnel: Arc<AppTunnel>,
-}
-
-#[derive(Serialize, Deserialize, Clone)]
-struct SessionOut {
-    username: String,
-    email: Option<String>,
 }
 
 #[tauri::command]
@@ -41,15 +34,6 @@ async fn auth_login(state: State<'_, AppState>, username_or_email: String, passw
         "username": outcome.username,
         "email": outcome.email,
     }))
-}
-
-#[tauri::command]
-fn auth_restore_session(state: State<'_, AppState>) -> Option<SessionOut> {
-    let data = state.data.lock().unwrap();
-    data.session.as_ref().map(|s| SessionOut {
-        username: s.username.clone(),
-        email: None,
-    })
 }
 
 #[tauri::command]
@@ -143,7 +127,6 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             auth_login,
-            auth_restore_session,
             auth_logout,
             vpn_connect,
             vpn_disconnect,

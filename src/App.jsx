@@ -9,13 +9,13 @@ import FileServerPage from './components/FileServerPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
 
 export default function App() {
-  const [session, setSession] = useState(undefined); // undefined = loading, null = signed out
+  // Always starts signed out (null), never auto-restored from a saved session. OpenVPN needs the
+  // real password on every connect, not a session token, and passwords are deliberately never
+  // written to disk — so a "remembered" login here would have no password to actually connect
+  // with, which is exactly the "missing username and password" bug this replaced.
+  const [session, setSession] = useState(null);
   const [page, setPage] = useState('home');
   const [status, setStatus] = useState({ state: 'disconnected', detail: null });
-
-  useEffect(() => {
-    api.restoreSession().then((s) => setSession(s || null));
-  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -24,10 +24,6 @@ export default function App() {
     api.onStatus((s) => setStatus(s)).then((fn) => (unlisten = fn));
     return () => unlisten && unlisten();
   }, [session]);
-
-  if (session === undefined) {
-    return <div className="app-shell loading" />;
-  }
 
   if (!session) {
     return <LoginScreen onLoggedIn={setSession} />;
