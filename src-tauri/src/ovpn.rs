@@ -127,9 +127,39 @@ impl OvpnClient {
         };
 
         let this = self.clone();
+        let emit_for_mgmt = emit.clone();
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(500)); // let openvpn bind the management port
-            this.run_management_session(my_generation, username, password, physical, split_tunnel_config, app_tunnel, emit);
+            this.run_management_session(my_generation, username, password, physical, split_tunnel_config, app_tunnel, emit_for_mgmt);
+        });
+
+        // Watches for the process dying on its own (TAP/driver failure, a rejection the
+        // PASSWORD/STATE parsing above didn't catch, a crash) — without this, an unexpected
+        // exit left the UI stuck showing "Connecting" forever instead of reporting a failure.
+        let this = self.clone();
+        thread::spawn(move || loop {
+            thread::sleep(Duration::from_millis(500));
+            let exited = {
+                let mut guard = this.child.lock().unwrap();
+                match guard.as_mut() {
+                    Some(child) => match child.try_wait() {
+                        Ok(Some(status)) => {
+                            *guard = None;
+                            Some(status)
+                        }
+                        _ => None,
+                    },
+                    None => return, // already cleaned up elsewhere (normal disconnect)
+                }
+            };
+            if let Some(status) = exited {
+                this.finish_disconnected(
+                    my_generation,
+                    &emit,
+                    Some(format!("openvpn exited unexpectedly ({status})")),
+                );
+                return;
+            }
         });
 
         Ok(())

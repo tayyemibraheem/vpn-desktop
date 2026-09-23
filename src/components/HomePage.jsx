@@ -24,6 +24,14 @@ export default function HomePage({ session, status }) {
   const [elapsed, setElapsed] = useState(0);
   const [splitApps, setSplitApps] = useState([]);
   const [connectError, setConnectError] = useState(null);
+  const [logs, setLogs] = useState([]);
+  const [showLogs, setShowLogs] = useState(false);
+
+  useEffect(() => {
+    let unlisten;
+    api.onLog((line) => setLogs((prev) => [...prev.slice(-199), line])).then((fn) => (unlisten = fn));
+    return () => unlisten && unlisten();
+  }, []);
 
   useEffect(() => {
     if (status.state === 'connected' && !connectedAt) {
@@ -115,6 +123,9 @@ export default function HomePage({ session, status }) {
                 {status.state === 'connected' ? 'Disconnect' : status.state === 'connecting' ? 'Connecting…' : 'Connect'}
               </button>
               {connectError && <p className="error-text">{connectError}</p>}
+              {!connectError && status.state === 'disconnected' && status.detail && (
+                <p className="error-text">{status.detail}</p>
+              )}
             </div>
 
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
@@ -147,6 +158,14 @@ export default function HomePage({ session, status }) {
               <p className="empty-hint" style={{ margin: 0 }}>
                 Public IP / location lookup isn't wired up yet — placeholder for a follow-up.
               </p>
+              <button className="log-toggle" onClick={() => setShowLogs((v) => !v)}>
+                {showLogs ? 'Hide connection log' : 'Show connection log'}
+              </button>
+              {showLogs && (
+                <div className="log-box">
+                  {logs.length ? logs.join('\n') : 'No log output yet.'}
+                </div>
+              )}
             </div>
 
             <div className="card side-card">
