@@ -27,3 +27,6 @@ export const SquareIcon = () => (<svg {...base} width={11} height={11}><rect x="
 export const XIcon = () => (<svg {...base} width={13} height={13}><path d="M6 6l12 12M18 6 6 18" /></svg>);
 export const CopyIcon = () => (<svg {...base} width={14} height={14}><rect x="8" y="8" width="12" height="12" rx="2" /><path d="M4 16V6a2 2 0 0 1 2-2h10" /></svg>);
 export const ChevronRight = () => (<svg {...base} width={16} height={16}><path d="M9 6l6 6-6 6" /></svg>);
+export const DeviceIcon = () => (
+  <svg {...base}><rect x="5" y="2" width="9" height="14" rx="1.5" /><path d="M8.5 13.5h2" /><rect x="14" y="8" width="7" height="10" rx="1.5" /><path d="M16.7 15.5h1.6" /></svg>
+);

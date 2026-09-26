@@ -1,6 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 mod auth;
+mod devices;
 mod split_tunnel;
 mod store;
 mod wireguard;
@@ -42,6 +43,37 @@ fn auth_logout(state: State<'_, AppState>) {
     let mut data = state.data.lock().unwrap();
     data.session = None;
     store::save(&data);
+}
+
+fn access_token(state: &State<'_, AppState>) -> Result<String, String> {
+    state
+        .data
+        .lock()
+        .unwrap()
+        .session
+        .clone()
+        .map(|s| s.access_token)
+        .ok_or_else(|| "Not signed in".to_string())
+}
+
+#[tauri::command]
+async fn devices_list(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    devices::list_devices(&access_token(&state)?).await
+}
+
+#[tauri::command]
+async fn devices_enroll(state: State<'_, AppState>, device_name: String, platform: String) -> Result<serde_json::Value, String> {
+    devices::enroll_device(&access_token(&state)?, &device_name, &platform).await
+}
+
+#[tauri::command]
+async fn devices_revoke(state: State<'_, AppState>, device_id: i64) -> Result<(), String> {
+    devices::revoke_device(&access_token(&state)?, device_id).await
+}
+
+#[tauri::command]
+async fn subscription_me(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    devices::my_subscription(&access_token(&state)?).await
 }
 
 #[tauri::command]
@@ -132,6 +164,10 @@ fn main() {
             split_tunnel_get_config,
             split_tunnel_set_config,
             split_tunnel_list_candidate_apps,
+            devices_list,
+            devices_enroll,
+            devices_revoke,
+            subscription_me,
         ])
         .on_window_event(|window, event| {
             // A disconnect on close is not optional — leaving split-tunnel routes or a live

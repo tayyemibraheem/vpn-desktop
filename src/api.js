@@ -14,4 +14,9 @@ export const api = {
   getSplitTunnelConfig: () => invoke('split_tunnel_get_config'),
   setSplitTunnelConfig: (config) => invoke('split_tunnel_set_config', { config }),
   listCandidateApps: () => invoke('split_tunnel_list_candidate_apps'),
+
+  listDevices: () => invoke('devices_list'),
+  enrollDevice: (deviceName, platform) => invoke('devices_enroll', { deviceName, platform }),
+  revokeDevice: (deviceId) => invoke('devices_revoke', { deviceId }),
+  getSubscription: () => invoke('subscription_me'),
 };

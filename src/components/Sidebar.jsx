@@ -1,10 +1,11 @@
 import React from 'react';
-import { HomeIcon, ServerIcon, SplitIcon, FileServerIcon, SettingsIcon } from './icons.jsx';
+import { HomeIcon, ServerIcon, SplitIcon, DeviceIcon, FileServerIcon, SettingsIcon } from './icons.jsx';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Home', icon: HomeIcon },
   { id: 'servers', label: 'Servers', icon: ServerIcon },
   { id: 'split', label: 'Split Tunneling', icon: SplitIcon },
+  { id: 'devices', label: 'Devices', icon: DeviceIcon },
   { id: 'files', label: 'File Server', icon: FileServerIcon, badge: 'Soon' },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];

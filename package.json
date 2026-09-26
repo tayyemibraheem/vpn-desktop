@@ -1,6 +1,6 @@
 {
   "name": "tayyem-vpn-desktop",
-  "version": "0.3.3",
+  "version": "0.4.0",
   "description": "TayyemVPN desktop client for Windows — connect/disconnect and split tunneling (per-app and per-destination)",
   "private": true,
   "type": "module",
@@ -12,9 +12,10 @@
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
-    "@tauri-apps/plugin-updater": "^2.3.0",
     "@tauri-apps/plugin-process": "^2.0.0",
+    "@tauri-apps/plugin-updater": "^2.3.0",
     "axios": "^1.7.9",
+    "qrcode": "^1.5.4",
     "react": "^18.3.1",
     "react-dom": "^18.3.1"
   },

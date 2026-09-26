@@ -13,7 +13,7 @@ use std::time::Duration;
 use tokio::net::lookup_host;
 use x25519_dalek::{PublicKey, StaticSecret};
 
-const VPN_MANAGER_BASE_URL: &str = "https://api-vpn.tayyem.dev";
+pub(crate) const VPN_MANAGER_BASE_URL: &str = "https://api-vpn.tayyem.dev";
 const INTERFACE_NAME: &str = "TayyemVPN";
 
 #[cfg(target_os = "windows")]
