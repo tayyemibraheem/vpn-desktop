@@ -37,11 +37,37 @@ pub struct WireguardDevice {
     pub dns: String,
 }
 
+/// Same role as `WireguardDevice`, for the AmneziaWG engine — a separate identity/keypair since
+/// the two protocols aren't interchangeable, generated once and reused the same way. The
+/// jc/jmin/jmax/s1/s2/h1-h4 obfuscation parameters and the preshared key come from the server at
+/// registration time rather than being hardcoded here, so they can be rotated without an app update.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct AmneziaWgDevice {
+    pub device_id: i64,
+    pub private_key: String,
+    pub preshared_key: String,
+    pub assigned_ip: String,
+    pub server_hostname: String,
+    pub server_public_key: String,
+    pub server_listen_port: u16,
+    pub dns: String,
+    pub jc: u16,
+    pub jmin: u16,
+    pub jmax: u16,
+    pub s1: u16,
+    pub s2: u16,
+    pub h1: u32,
+    pub h2: u32,
+    pub h3: u32,
+    pub h4: u32,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AppData {
     pub session: Option<Session>,
     pub split_tunnel: SplitTunnelConfig,
     pub wireguard: Option<WireguardDevice>,
+    pub amneziawg: Option<AmneziaWgDevice>,
 }
 
 fn config_path() -> PathBuf {

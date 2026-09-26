@@ -338,12 +338,12 @@ impl WireguardClient {
     }
 }
 
-fn decode_key(b64: &str) -> Result<[u8; 32], String> {
+pub(crate) fn decode_key(b64: &str) -> Result<[u8; 32], String> {
     let bytes = STANDARD.decode(b64).map_err(|e| format!("Invalid key: {e}"))?;
     bytes.try_into().map_err(|_| "Invalid key length".to_string())
 }
 
-async fn resolve_ipv4(host: &str) -> Option<Ipv4Addr> {
+pub(crate) async fn resolve_ipv4(host: &str) -> Option<Ipv4Addr> {
     if let Ok(addr) = host.parse::<Ipv4Addr>() {
         return Some(addr);
     }
@@ -376,7 +376,7 @@ fn run_powershell_checked(script: &str) -> Result<(), String> {
 /// is split into two /1 routes rather than one literal 0.0.0.0/0 — the same trick the official
 /// WireGuard client uses — so it always wins over the existing physical default route regardless
 /// of that route's metric, without creating an ambiguous duplicate 0.0.0.0/0 entry.
-fn configure_interface(name: &str, assigned_ip: &str, dns: &str) -> Result<(), String> {
+pub(crate) fn configure_interface(name: &str, assigned_ip: &str, dns: &str) -> Result<(), String> {
     run_powershell_checked(&format!(
         "New-NetIPAddress -InterfaceAlias '{name}' -IPAddress {assigned_ip} -PrefixLength 32 -ErrorAction Stop | Out-Null"
     ))?;
@@ -392,7 +392,7 @@ fn configure_interface(name: &str, assigned_ip: &str, dns: &str) -> Result<(), S
     Ok(())
 }
 
-fn ping(ip: &str) -> bool {
+pub(crate) fn ping(ip: &str) -> bool {
     let mut cmd = Command::new("ping");
     #[cfg(target_os = "windows")]
     {

@@ -32,6 +32,36 @@ jobs:
         with:
           node-version: 20
 
+      - name: Install Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install MinGW (for building the AmneziaWG bridge DLL via cgo)
+        run: choco install mingw -y --no-progress
+
+      - name: Build AmneziaWG bridge DLL
+        shell: pwsh
+        run: |
+          $dir = "resources/amneziawg/amd64"
+          New-Item -ItemType Directory -Force -Path $dir | Out-Null
+          $env:CGO_ENABLED = "1"
+          $env:GOOS = "windows"
+          $env:GOARCH = "amd64"
+          Push-Location src-tauri/awg-bridge
+          go build -buildmode=c-shared -o "../../$dir/awgbridge.dll" .
+          Pop-Location
+
+      - name: Fetch Wintun (raw TUN driver the AmneziaWG bridge drives)
+        shell: pwsh
+        run: |
+          $dir = "resources/amneziawg/amd64"
+          $zipPath = "$env:TEMP\wintun.zip"
+          Invoke-WebRequest -Uri "https://www.wintun.net/builds/wintun-0.14.1.zip" -OutFile $zipPath
+          $extractDir = "$env:TEMP\wintun-extract"
+          Expand-Archive -Path $zipPath -DestinationPath $extractDir -Force
+          Copy-Item (Join-Path $extractDir "wintun\bin\amd64\wintun.dll") $dir -Force
+
       - name: Fetch WinDivert (per-app split tunneling)
         shell: pwsh
         run: |

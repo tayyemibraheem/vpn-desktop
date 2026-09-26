@@ -1,5 +1,7 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod amneziawg;
+mod amneziawg_bridge;
 mod auth;
 mod devices;
 mod split_tunnel;
