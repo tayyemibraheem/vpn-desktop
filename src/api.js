@@ -5,7 +5,7 @@ export const api = {
   login: (usernameOrEmail, password) => invoke('auth_login', { usernameOrEmail, password }),
   logout: () => invoke('auth_logout'),
 
-  connect: (username, password) => invoke('vpn_connect', { username, password }),
+  connect: () => invoke('vpn_connect'),
   disconnect: () => invoke('vpn_disconnect'),
   getStatus: () => invoke('vpn_get_status'),
   onStatus: (cb) => listen('vpn:status', (event) => cb(event.payload)),

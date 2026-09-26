@@ -1,6 +1,6 @@
 [package]
 name = "tayyem-vpn-desktop"
-version = "0.1.5"
+version = "0.2.0"
 description = "TayyemVPN desktop client"
 edition = "2021"
 
@@ -18,10 +18,9 @@ reqwest = { version = "0.12", features = ["json"] }
 tokio = { version = "1", features = ["full"] }
 dirs = "5"
 libloading = "0.8"
-
-# NOTE: this crate has never been compiled or run — written from documented Tauri v2 / crates.io
-# API shapes with no Rust toolchain available in the environment this was authored in. Treat a
-# first `cargo build` on Windows as the real first compile-check, not a formality.
+x25519-dalek = { version = "2", features = ["static_secrets", "getrandom"] }
+rand_core = { version = "0.6", features = ["getrandom"] }
+base64 = "0.22"
 
 [[bin]]
 name = "tayyem-vpn-desktop"

@@ -31,9 +31,9 @@ struct RouteJson {
     interface_index: u32,
 }
 
-/// Snapshots the default route before OpenVPN connects and rewrites it — the only reliable
-/// window to learn "what the real physical network looks like" before redirect-gateway takes
-/// over 0.0.0.0/0.
+/// Snapshots the default route before the WireGuard tunnel comes up and rewrites it — the only
+/// reliable window to learn "what the real physical network looks like" before the tunnel's
+/// AllowedIPs = 0.0.0.0/0 takes over the default route.
 pub fn capture_original_gateway() -> Option<PhysicalGateway> {
     let stdout = run_powershell(
         "Get-NetRoute -DestinationPrefix '0.0.0.0/0' | Sort-Object -Property RouteMetric | \

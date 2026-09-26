@@ -260,7 +260,7 @@ fn refresh_port_pid_map(state: &Arc<Mutex<SharedState>>) {
 
 fn get_vpn_interface_index() -> Option<u32> {
     let stdout = run_powershell(
-        "Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'TAP|Wintun|OpenVPN' -and $_.Status -eq 'Up' } | Select-Object -First 1 -ExpandProperty ifIndex",
+        "Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wintun|WireGuard' -and $_.Status -eq 'Up' } | Select-Object -First 1 -ExpandProperty ifIndex",
     )
     .ok()?;
     stdout.trim().parse::<u32>().ok()

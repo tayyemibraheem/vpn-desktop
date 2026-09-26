@@ -15,10 +15,26 @@ pub struct SplitTunnelConfig {
     pub destinations: Vec<String>,
 }
 
+/// This machine's WireGuard identity — generated once on first connect and reused on every
+/// connect after that, the same way a real WireGuard client treats a device's keypair as a
+/// persistent identity rather than something to re-provision every session. Survives logout;
+/// only cleared if the user explicitly forgets this device.
+#[derive(Serialize, Deserialize, Clone)]
+pub struct WireguardDevice {
+    pub device_id: i64,
+    pub private_key: String,
+    pub assigned_ip: String,
+    pub server_hostname: String,
+    pub server_public_key: String,
+    pub server_listen_port: u16,
+    pub dns: String,
+}
+
 #[derive(Serialize, Deserialize, Clone, Default)]
 pub struct AppData {
     pub session: Option<Session>,
     pub split_tunnel: SplitTunnelConfig,
+    pub wireguard: Option<WireguardDevice>,
 }
 
 fn config_path() -> PathBuf {

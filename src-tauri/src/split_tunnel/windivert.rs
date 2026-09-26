@@ -7,7 +7,7 @@
 //! against. The byte offsets below (Outbound flag bit, Network.IfIdx/SubIfIdx union offset) are
 //! the specific numbers most likely to be wrong — if per-app split tunneling misbehaves, this is
 //! the first file to instrument and check against the actual WinDivert header for the installed
-//! version. Nothing else in this app (login, OpenVPN connect/disconnect, destination-based split
+//! version. Nothing else in this app (login, WireGuard connect/disconnect, destination-based split
 //! tunneling) depends on this file being correct.
 
 use libloading::{Library, Symbol};

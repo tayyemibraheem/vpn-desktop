@@ -59,7 +59,7 @@ export default function HomePage({ session, status }) {
     setConnectError(null);
     try {
       if (status.state === 'disconnected') {
-        const result = await api.connect(session.username, session.password);
+        const result = await api.connect();
         if (!result?.ok) {
           setConnectError(result?.error || 'Failed to connect');
         }

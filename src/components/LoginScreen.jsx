@@ -18,9 +18,7 @@ export default function LoginScreen({ onLoggedIn }) {
         setError(result.error);
         return;
       }
-      // The plaintext password is only kept in memory for this session, handed to OpenVPN's
-      // management interface at connect time, and never written to disk.
-      onLoggedIn({ username: result.username, email: result.email, password });
+      onLoggedIn({ username: result.username, email: result.email });
     } finally {
       setSubmitting(false);
     }
