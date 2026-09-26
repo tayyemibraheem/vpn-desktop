@@ -23,7 +23,7 @@ export const api = {
   listCandidateApps: () => invoke('split_tunnel_list_candidate_apps'),
 
   listDevices: () => invoke('devices_list'),
-  enrollDevice: (deviceName, platform) => invoke('devices_enroll', { deviceName, platform }),
-  revokeDevice: (deviceId) => invoke('devices_revoke', { deviceId }),
+  requestDeviceVerification: (body) => invoke('devices_request_verification', { body }),
+  confirmDeviceVerification: (code) => invoke('devices_confirm_verification', { code }),
   getSubscription: () => invoke('subscription_me'),
 };

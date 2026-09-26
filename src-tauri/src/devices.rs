@@ -24,36 +24,43 @@ pub async fn list_devices(access_token: &str) -> Result<serde_json::Value, Strin
     resp.json().await.map_err(|e| format!("Unexpected response from the VPN service: {e}"))
 }
 
-/// Enrolls a device that can't generate its own keypair — a phone that will scan the QR code
-/// this returns. The response's configText contains a private key and is shown to the user
-/// exactly once; it is never fetchable again after this call returns.
-pub async fn enroll_device(access_token: &str, device_name: &str, platform: &str) -> Result<serde_json::Value, String> {
+/// Step 1 of adding or removing a device: emails a 6-digit code and stashes the action
+/// server-side. `body` is `{"action":"ENROLL","deviceName":...,"platform":...}` or
+/// `{"action":"REVOKE","deviceId":...}`.
+pub async fn request_device_verification(access_token: &str, body: serde_json::Value) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
     let resp = client
-        .post(format!("{VPN_MANAGER_BASE_URL}/api/devices/enroll"))
+        .post(format!("{VPN_MANAGER_BASE_URL}/api/devices/verify/request"))
         .bearer_auth(access_token)
-        .json(&serde_json::json!({ "deviceName": device_name, "platform": platform }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| format!("Could not reach the VPN service: {e}"))?;
     if !resp.status().is_success() {
-        return Err(error_message(resp, "Could not add this device").await);
+        return Err(error_message(resp, "Could not send a verification code").await);
     }
     resp.json().await.map_err(|e| format!("Unexpected response from the VPN service: {e}"))
 }
 
-pub async fn revoke_device(access_token: &str, device_id: i64) -> Result<(), String> {
+/// Step 2: checks the emailed code and, if it matches, performs whichever action was stashed —
+/// the response is the new device's config for an ENROLL, or empty for a REVOKE.
+pub async fn confirm_device_verification(access_token: &str, code: &str) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
     let resp = client
-        .delete(format!("{VPN_MANAGER_BASE_URL}/api/devices/{device_id}"))
+        .post(format!("{VPN_MANAGER_BASE_URL}/api/devices/verify/confirm"))
         .bearer_auth(access_token)
+        .json(&serde_json::json!({ "code": code }))
         .send()
         .await
         .map_err(|e| format!("Could not reach the VPN service: {e}"))?;
     if !resp.status().is_success() {
-        return Err(error_message(resp, "Could not remove this device").await);
+        return Err(error_message(resp, "Could not confirm that code").await);
     }
-    Ok(())
+    let text = resp.text().await.map_err(|e| format!("Unexpected response from the VPN service: {e}"))?;
+    if text.is_empty() {
+        return Ok(serde_json::Value::Null);
+    }
+    serde_json::from_str(&text).map_err(|e| format!("Unexpected response from the VPN service: {e}"))
 }
 
 pub async fn my_subscription(access_token: &str) -> Result<serde_json::Value, String> {

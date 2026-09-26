@@ -133,13 +133,13 @@ async fn devices_list(state: State<'_, AppState>) -> Result<serde_json::Value, S
 }
 
 #[tauri::command]
-async fn devices_enroll(state: State<'_, AppState>, device_name: String, platform: String) -> Result<serde_json::Value, String> {
-    devices::enroll_device(&valid_access_token(&state).await?, &device_name, &platform).await
+async fn devices_request_verification(state: State<'_, AppState>, body: serde_json::Value) -> Result<serde_json::Value, String> {
+    devices::request_device_verification(&valid_access_token(&state).await?, body).await
 }
 
 #[tauri::command]
-async fn devices_revoke(state: State<'_, AppState>, device_id: i64) -> Result<(), String> {
-    devices::revoke_device(&valid_access_token(&state).await?, device_id).await
+async fn devices_confirm_verification(state: State<'_, AppState>, code: String) -> Result<serde_json::Value, String> {
+    devices::confirm_device_verification(&valid_access_token(&state).await?, &code).await
 }
 
 #[tauri::command]
@@ -238,8 +238,8 @@ fn main() {
             split_tunnel_set_config,
             split_tunnel_list_candidate_apps,
             devices_list,
-            devices_enroll,
-            devices_revoke,
+            devices_request_verification,
+            devices_confirm_verification,
             subscription_me,
         ])
         .on_window_event(|window, event| {

@@ -24,12 +24,16 @@ export default function DevicesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [deviceName, setDeviceName] = useState('');
   const [platform, setPlatform] = useState('IOS');
-  const [enrolling, setEnrolling] = useState(false);
-  const [enrollError, setEnrollError] = useState(null);
-  const [enrolled, setEnrolled] = useState(null); // { configText, qrDataUrl, deviceName }
+  const [requesting, setRequesting] = useState(false);
+  const [requestError, setRequestError] = useState(null);
 
-  const [revokingId, setRevokingId] = useState(null);
-  const [revokeError, setRevokeError] = useState(null);
+  // { action: 'ENROLL'|'REVOKE', maskedEmail, deviceName, platform?, deviceId? }
+  const [pending, setPending] = useState(null);
+  const [code, setCode] = useState('');
+  const [confirming, setConfirming] = useState(false);
+  const [confirmError, setConfirmError] = useState(null);
+
+  const [enrolled, setEnrolled] = useState(null); // { configText, qrDataUrl, deviceName }
 
   async function refresh() {
     setLoadError(null);
@@ -50,23 +54,57 @@ export default function DevicesPage() {
 
   const atLimit = subscription && devices.length >= subscription.maxDevices;
 
-  async function onEnroll(e) {
+  async function onRequestEnroll(e) {
     e.preventDefault();
     const name = deviceName.trim();
     if (!name) return;
-    setEnrolling(true);
-    setEnrollError(null);
+    setRequesting(true);
+    setRequestError(null);
     try {
-      const result = await api.enrollDevice(name, platform);
-      const qrDataUrl = await QRCode.toDataURL(result.configText, { width: 260, margin: 1 });
-      setEnrolled({ ...result, qrDataUrl });
+      const result = await api.requestDeviceVerification({ action: 'ENROLL', deviceName: name, platform });
+      setPending({ action: 'ENROLL', deviceName: name, platform, maskedEmail: result.maskedEmail });
       setFormOpen(false);
       setDeviceName('');
+      setCode('');
+    } catch (err) {
+      setRequestError(err?.message || String(err));
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  async function onRequestRevoke(device) {
+    setRequestError(null);
+    setRequesting(true);
+    try {
+      const result = await api.requestDeviceVerification({ action: 'REVOKE', deviceId: device.id });
+      setPending({ action: 'REVOKE', deviceId: device.id, deviceName: device.deviceName, maskedEmail: result.maskedEmail });
+      setCode('');
+    } catch (err) {
+      setRequestError(err?.message || String(err));
+    } finally {
+      setRequesting(false);
+    }
+  }
+
+  async function onConfirm(e) {
+    e.preventDefault();
+    if (!code.trim()) return;
+    setConfirming(true);
+    setConfirmError(null);
+    try {
+      const result = await api.confirmDeviceVerification(code.trim());
+      if (pending.action === 'ENROLL') {
+        const qrDataUrl = await QRCode.toDataURL(result.configText, { width: 260, margin: 1 });
+        setEnrolled({ ...result, qrDataUrl });
+      }
+      setPending(null);
+      setCode('');
       await refresh();
     } catch (err) {
-      setEnrollError(err?.message || String(err));
+      setConfirmError(err?.message || String(err));
     } finally {
-      setEnrolling(false);
+      setConfirming(false);
     }
   }
 
@@ -88,19 +126,6 @@ export default function DevicesPage() {
     }
   }
 
-  async function onRevoke(device) {
-    setRevokeError(null);
-    setRevokingId(device.id);
-    try {
-      await api.revokeDevice(device.id);
-      await refresh();
-    } catch (err) {
-      setRevokeError(err?.message || String(err));
-    } finally {
-      setRevokingId(null);
-    }
-  }
-
   return (
     <>
       <TitleBar />
@@ -113,7 +138,7 @@ export default function DevicesPage() {
         {loading && <p className="empty-hint">Loading your devices…</p>}
         {loadError && <p className="error-text">{loadError}</p>}
 
-        {!loading && !loadError && (
+        {!loading && !loadError && !pending && (
           <>
             {subscription && (
               <p className="empty-hint" style={{ fontStyle: 'normal' }}>
@@ -132,21 +157,21 @@ export default function DevicesPage() {
                         {platformLabel(d.platform)} · {d.assignedIp}
                       </div>
                     </div>
-                    <button onClick={() => onRevoke(d)} disabled={revokingId === d.id} title="Remove">
-                      {revokingId === d.id ? '…' : '×'}
+                    <button onClick={() => onRequestRevoke(d)} disabled={requesting} title="Remove">
+                      ×
                     </button>
                   </div>
                 ))}
               </div>
 
-              {revokeError && <p className="error-text">{revokeError}</p>}
+              {requestError && <p className="error-text">{requestError}</p>}
 
               {!formOpen ? (
                 <button className="btn btn-ghost" onClick={() => setFormOpen(true)} disabled={atLimit} style={{ alignSelf: 'flex-start' }}>
                   + Add Device
                 </button>
               ) : (
-                <form onSubmit={onEnroll} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+                <form onSubmit={onRequestEnroll} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
                   <div className="field">
                     <label>Device name</label>
                     <input value={deviceName} onChange={(e) => setDeviceName(e.target.value)} placeholder="My iPhone" autoFocus required />
@@ -159,10 +184,9 @@ export default function DevicesPage() {
                       ))}
                     </select>
                   </div>
-                  {enrollError && <p className="error-text">{enrollError}</p>}
                   <div style={{ display: 'flex', gap: 8 }}>
-                    <button className="btn btn-primary" type="submit" disabled={enrolling}>
-                      {enrolling ? 'Adding…' : 'Generate QR code'}
+                    <button className="btn btn-primary" type="submit" disabled={requesting}>
+                      {requesting ? 'Sending code…' : 'Send verification code'}
                     </button>
                     <button className="btn btn-ghost" type="button" onClick={() => setFormOpen(false)}>Cancel</button>
                   </div>
@@ -173,6 +197,40 @@ export default function DevicesPage() {
               )}
             </div>
           </>
+        )}
+
+        {pending && (
+          <div className="card" style={{ maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 12 }}>
+            <div className="section-title">
+              {pending.action === 'ENROLL' ? `Confirm adding "${pending.deviceName}"` : `Confirm removing "${pending.deviceName}"`}
+            </div>
+            <p className="empty-hint" style={{ margin: 0 }}>
+              We sent a 6-digit code to {pending.maskedEmail}. Enter it below to confirm.
+            </p>
+            <form onSubmit={onConfirm} style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+              <div className="field">
+                <label>Verification code</label>
+                <input
+                  value={code}
+                  onChange={(e) => setCode(e.target.value)}
+                  placeholder="123456"
+                  inputMode="numeric"
+                  maxLength={6}
+                  autoFocus
+                  required
+                />
+              </div>
+              {confirmError && <p className="error-text">{confirmError}</p>}
+              <div style={{ display: 'flex', gap: 8 }}>
+                <button className="btn btn-primary" type="submit" disabled={confirming}>
+                  {confirming ? 'Confirming…' : 'Confirm'}
+                </button>
+                <button className="btn btn-ghost" type="button" onClick={() => { setPending(null); setCode(''); setConfirmError(null); }}>
+                  Cancel
+                </button>
+              </div>
+            </form>
+          </div>
         )}
 
         {enrolled && (
