@@ -117,7 +117,6 @@ async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Va
 }
 
 struct ActiveTunnel {
-    bridge: Arc<AmneziaWgBridge>,
     tunnel: AwgTunnel,
 }
 
@@ -127,6 +126,13 @@ pub struct AmneziaWgClient {
     applied_routes: Mutex<Vec<String>>,
     generation: Mutex<u64>,
     active: Mutex<Option<ActiveTunnel>>,
+    /// Loaded once and kept for the process's entire lifetime, never dropped. Go's runtime
+    /// (goroutine scheduler, GC, sysmon thread) doesn't support being cleanly torn down and
+    /// unmapped from a host process once initialized — calling FreeLibrary on this DLL after
+    /// disconnecting (which is what dropping this field would do) crashes the whole app, since
+    /// Go's background runtime threads are still executing code in the memory that just got
+    /// unmapped. Stopping a tunnel only ever closes that tunnel's handle, never this library.
+    bridge: Mutex<Option<Arc<AmneziaWgBridge>>>,
 }
 
 impl AmneziaWgClient {
@@ -137,7 +143,22 @@ impl AmneziaWgClient {
             applied_routes: Mutex::new(vec![]),
             generation: Mutex::new(0),
             active: Mutex::new(None),
+            bridge: Mutex::new(None),
         }
+    }
+
+    fn get_or_load_bridge(&self, resources_dir: &PathBuf) -> Result<Arc<AmneziaWgBridge>, String> {
+        let mut guard = self.bridge.lock().unwrap();
+        if let Some(bridge) = guard.as_ref() {
+            return Ok(bridge.clone());
+        }
+        let dll_path = resources_dir.join("amneziawg").join("amd64").join("awgbridge.dll");
+        if !dll_path.exists() {
+            return Err("Missing bundled AmneziaWG driver — try reinstalling the app.".to_string());
+        }
+        let bridge = Arc::new(AmneziaWgBridge::load(&dll_path)?);
+        *guard = Some(bridge.clone());
+        Ok(bridge)
     }
 
     pub fn status(&self) -> (String, Option<String>) {
@@ -158,7 +179,9 @@ impl AmneziaWgClient {
 
     fn teardown_active(&self) {
         if let Some(active) = self.active.lock().unwrap().take() {
-            active.bridge.stop(active.tunnel);
+            if let Some(bridge) = self.bridge.lock().unwrap().as_ref() {
+                bridge.stop(active.tunnel);
+            }
         }
     }
 
@@ -217,20 +240,16 @@ impl AmneziaWgClient {
         }
         self.set_applied_destination_routes(endpoint_route);
 
-        let dll_path = resources_dir.join("amneziawg").join("amd64").join("awgbridge.dll");
-        if !dll_path.exists() {
-            return Err(self.fail_and_clear_routes(my_generation, &emit, "Missing bundled AmneziaWG driver — try reinstalling the app.".to_string()));
-        }
         // The Go wintun package hardcodes LOAD_LIBRARY_SEARCH_APPLICATION_DIR when it loads
-        // wintun.dll — that only checks the directory of the running .exe itself, not this
+        // wintun.dll — that only checks the directory of the running .exe itself, not the
         // resources subfolder, no matter where Tauri physically installs it. Copying it next to
         // the .exe on every connect is cheap (a few hundred KB) and keeps this working regardless
         // of the exact install layout.
         if let Err(e) = stage_wintun_next_to_exe(&resources_dir) {
             return Err(self.fail_and_clear_routes(my_generation, &emit, e));
         }
-        let bridge = match AmneziaWgBridge::load(&dll_path) {
-            Ok(b) => Arc::new(b),
+        let bridge = match self.get_or_load_bridge(&resources_dir) {
+            Ok(b) => b,
             Err(e) => return Err(self.fail_and_clear_routes(my_generation, &emit, e)),
         };
 
@@ -255,7 +274,7 @@ impl AmneziaWgClient {
             return Err(self.fail_and_clear_routes(my_generation, &emit, e));
         }
 
-        *self.active.lock().unwrap() = Some(ActiveTunnel { bridge: bridge.clone(), tunnel });
+        *self.active.lock().unwrap() = Some(ActiveTunnel { tunnel });
 
         emit("vpn:log", serde_json::json!("Adapter up, verifying connectivity..."));
 
@@ -270,7 +289,16 @@ impl AmneziaWgClient {
                 if *this.generation.lock().unwrap() != my_generation {
                     return;
                 }
-                let stats = this.active.lock().unwrap().as_ref().and_then(|a| a.bridge.peer_stats(&a.tunnel));
+                // Lock ordering (active, then bridge) matches teardown_active — always acquire
+                // in this order everywhere to avoid a lock-ordering deadlock between the two.
+                let stats = {
+                    let active_guard = this.active.lock().unwrap();
+                    let bridge_guard = this.bridge.lock().unwrap();
+                    match (active_guard.as_ref(), bridge_guard.as_ref()) {
+                        (Some(active), Some(bridge)) => bridge.peer_stats(&active.tunnel),
+                        _ => None,
+                    }
+                };
                 if let Some(ref s) = stats {
                     last_stats_log = format!("tx={} rx={} handshake_secs={}", s.tx_bytes, s.rx_bytes, s.last_handshake_secs);
                     if s.last_handshake_secs != 0 {
