@@ -85,6 +85,13 @@ pub async fn apply(destinations: &[String], physical: &PhysicalGateway) -> Vec<S
     let mut applied = Vec::new();
     for destination in destinations {
         for cidr in resolve_entry(destination).await {
+            // A route for this exact prefix can already exist — left behind by a prior run that
+            // didn't disconnect cleanly (crash, force-kill, power loss) — and New-NetRoute refuses
+            // to create a duplicate. Clearing it first makes this idempotent regardless of what
+            // state the routing table was left in.
+            let clear_script = format!("Remove-NetRoute -DestinationPrefix '{cidr}' -Confirm:$false -ErrorAction SilentlyContinue");
+            let _ = run_powershell(&clear_script);
+
             let script = format!(
                 "New-NetRoute -DestinationPrefix '{cidr}' -InterfaceIndex {} -NextHop '{}' -RouteMetric 1 -ErrorAction Stop | Out-Null",
                 physical.interface_index, physical.gateway_ip
