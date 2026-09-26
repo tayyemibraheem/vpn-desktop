@@ -202,13 +202,23 @@ impl WireguardClient {
             None => return Err(self.fail(my_generation, &emit, format!("Could not resolve {}", device.server_hostname))),
         };
 
+        // Must exist before the broad tunnel routes go in below — otherwise the encrypted
+        // handshake/data packets addressed to the server itself get swallowed by the tunnel's
+        // own 0.0.0.0/1 + 128.0.0.0/1 override and routed back into the tunnel that's still
+        // trying to establish, instead of out the real network card.
+        let endpoint_route = destination_routes::apply(&[endpoint_ip.to_string()], &physical).await;
+        if endpoint_route.is_empty() {
+            return Err(self.fail(my_generation, &emit, format!("Could not add a route to {endpoint_ip} via your physical network")));
+        }
+        self.set_applied_destination_routes(endpoint_route);
+
         let dll_path = resources_dir.join("wireguard-nt").join("amd64").join("wireguard.dll");
         if !dll_path.exists() {
-            return Err(self.fail(my_generation, &emit, "Missing bundled WireGuard driver — try reinstalling the app.".to_string()));
+            return Err(self.fail_and_clear_routes(my_generation, &emit, "Missing bundled WireGuard driver — try reinstalling the app.".to_string()));
         }
         let nt = match WireGuardNt::load(&dll_path) {
             Ok(n) => n,
-            Err(e) => return Err(self.fail(my_generation, &emit, e)),
+            Err(e) => return Err(self.fail_and_clear_routes(my_generation, &emit, e)),
         };
         if let Some(version) = nt.driver_version() {
             emit("vpn:log", serde_json::json!(format!("WireGuard driver loaded (version 0x{version:x})")));
@@ -217,23 +227,23 @@ impl WireguardClient {
         emit("vpn:log", serde_json::json!("Creating WireGuard adapter..."));
         let adapter = match nt.create_adapter(INTERFACE_NAME) {
             Ok(a) => a,
-            Err(e) => return Err(self.fail(my_generation, &emit, e)),
+            Err(e) => return Err(self.fail_and_clear_routes(my_generation, &emit, e)),
         };
 
         if let Err(e) = nt.set_configuration(&adapter, private_key, peer_public_key, endpoint_ip.octets(), device.server_listen_port) {
             nt.close_adapter(adapter);
-            return Err(self.fail(my_generation, &emit, e));
+            return Err(self.fail_and_clear_routes(my_generation, &emit, e));
         }
         if let Err(e) = nt.set_adapter_up(&adapter) {
             nt.close_adapter(adapter);
-            return Err(self.fail(my_generation, &emit, e));
+            return Err(self.fail_and_clear_routes(my_generation, &emit, e));
         }
 
         emit("vpn:log", serde_json::json!("Configuring interface address, DNS, and routes..."));
         if let Err(e) = configure_interface(INTERFACE_NAME, &device.assigned_ip, &device.dns) {
             nt.set_adapter_down(&adapter);
             nt.close_adapter(adapter);
-            return Err(self.fail(my_generation, &emit, e));
+            return Err(self.fail_and_clear_routes(my_generation, &emit, e));
         }
 
         *self.active.lock().unwrap() = Some(ActiveTunnel { nt, adapter });
@@ -276,7 +286,8 @@ impl WireguardClient {
                 emit("vpn:status", serde_json::json!({ "state": "connected", "detail": null }));
                 emit("vpn:log", serde_json::json!("Connected."));
 
-                let applied = destination_routes::apply(&split_tunnel_config.destinations, &physical).await;
+                let mut applied = this.applied_destination_routes(); // keeps the mandatory server-endpoint route
+                applied.extend(destination_routes::apply(&split_tunnel_config.destinations, &physical).await);
                 this.set_applied_destination_routes(applied);
 
                 let emit_for_log = emit.clone();
@@ -286,7 +297,7 @@ impl WireguardClient {
             } else {
                 emit("vpn:log", serde_json::json!(format!("No handshake after retries ({last_stats_log}).")));
                 this.teardown_active();
-                this.fail(
+                this.fail_and_clear_routes(
                     my_generation,
                     &emit,
                     "WireGuard adapter came up but never completed a handshake — check your connection and try again."
@@ -304,6 +315,15 @@ impl WireguardClient {
             emit("vpn:status", serde_json::json!({ "state": "disconnected", "detail": message }));
         }
         message
+    }
+
+    /// Same as `fail`, but also removes whatever destination routes (at minimum the mandatory
+    /// server-endpoint exception route) were already applied before the failure — used by every
+    /// error path that runs after that route goes in, so a failed connect never leaves it behind.
+    fn fail_and_clear_routes(&self, my_generation: u64, emit: &impl Fn(&str, serde_json::Value), message: String) -> String {
+        destination_routes::clear_all(&self.applied_destination_routes());
+        self.set_applied_destination_routes(vec![]);
+        self.fail(my_generation, emit, message)
     }
 
     pub async fn disconnect(&self) {

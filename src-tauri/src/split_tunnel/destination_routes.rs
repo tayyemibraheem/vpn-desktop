@@ -20,6 +20,12 @@ fn run_powershell(script: &str) -> std::io::Result<String> {
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
     let output = cmd.output()?;
+    // The scripts below pass -ErrorAction Stop specifically so a failing cmdlet sets a non-zero
+    // exit code — checking it here (rather than only whether powershell.exe itself launched) is
+    // what lets callers actually detect a route that silently failed to apply.
+    if !output.status.success() {
+        return Err(std::io::Error::other(String::from_utf8_lossy(&output.stderr).trim().to_string()));
+    }
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
