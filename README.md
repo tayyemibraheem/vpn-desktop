@@ -4,12 +4,15 @@ A native Windows desktop app (React UI inside a Tauri/Rust shell — not a websi
 for connecting to the Tayyem VPN, with split tunneling (per-app and per-destination) and
 in-place auto-updates.
 
-## Status: migrated from OpenVPN to WireGuard, not yet verified on real Windows hardware
+## Status: WireGuard fully embedded, not yet verified on real Windows hardware
 
-v0.1.x connected via OpenVPN and went through several real releases tested on Windows. v0.2.0
-rips that out and switches to WireGuard end-to-end (see `dev/tayyem_platform`'s `vpn_manager`
-service for the device-registration API this now talks to), which means the connect/disconnect
-path is brand new and **has not yet run on a real Windows machine**.
+v0.1.x connected via OpenVPN (removed entirely) and went through several real releases tested on
+Windows. v0.2.0 switches to WireGuard, and drives it directly via the official
+[wireguard-nt](https://git.zx2c4.com/wireguard-nt/about/) embeddable driver library — bundled as
+`resources/wireguard-nt/amd64/wireguard.dll` — rather than shelling out to a separately-installed
+WireGuard client. There is nothing else to install; the app creates and configures its own network
+adapter. This connect/disconnect path is brand new and **has not yet run on a real Windows
+machine**.
 
 | Piece | Confidence | Why |
 |---|---|---|
@@ -17,13 +20,14 @@ path is brand new and **has not yet run on a real Windows machine**.
 | React UI | High | Built and verified with `npm run build` from this repo |
 | Destination-based split tunneling (`route`) | High | Unchanged from v0.1.x, already verified working on Windows |
 | WireGuard keypair generation + device registration | Medium | Standard `x25519-dalek` keygen + a plain HTTPS call to `vpn_manager`, but never run end-to-end |
-| WireGuard tunnel service control (`wireguard.exe /installtunnelservice`) | Medium | Documented official CLI, but never run against a real installed WireGuard client |
+| Interface IP/DNS/default-route setup (PowerShell) | Medium-high | Standard `New-NetIPAddress`/`Set-DnsClientServerAddress`/`New-NetRoute` cmdlets, same pattern already verified in `destination_routes.rs` |
 | Auto-updater | Medium | Tauri's official plugin, already verified working in v0.1.x releases |
+| Embedded WireGuard driver (wireguard-nt via `wireguard_nt.rs`) | **Low — needs real testing** | Raw FFI into the official `wireguard.dll`'s C ABI — the `WgInterface`/`WgPeer`/`WgAllowedIp` struct layouts were hand-derived from wireguard-nt's public header with no Windows machine to verify the result against. Each struct has a compile-time size assertion recording the exact byte count that derivation produced; if `WireGuardSetConfiguration` fails outright or a tunnel comes up but never handshakes, this is the first file to re-check against a fresh `wireguard.h`. |
 | Per-app split tunneling (WinDivert) | **Low — needs real testing** | Raw FFI into `WinDivert.dll`'s C ABI with hand-written struct byte offsets (`src-tauri/src/split_tunnel/windivert.rs`). Unchanged from v0.1.x and still unverified on real hardware. If it's wrong, everything else in the app still works — destination-based split tunneling and the VPN connection don't depend on it. |
 
-**First thing to test on a real Windows machine:** install the official WireGuard client, then
-sign in and hit Connect. Watch the in-app connection log — device registration and tunnel-service
-startup both log their own steps, so a failure there points straight at which half broke.
+**First thing to test on a real Windows machine:** just install the app and sign in — no other
+downloads needed. Watch the in-app connection log; device registration, adapter creation, and
+interface configuration each log their own step, so a failure points straight at which one broke.
 
 ## Requirements
 
@@ -33,9 +37,9 @@ startup both log their own steps, so a failure there points straight at which ha
 - [Tauri CLI prerequisites](https://tauri.app/start/prerequisites/) (WebView2 — usually already
   present on Windows 11; Visual Studio Build Tools with the "Desktop development with C++"
   workload)
-- The **official WireGuard client** from [wireguard.com/install](https://www.wireguard.com/install/)
-  installed at its default path (`C:\Program Files\WireGuard\wireguard.exe`) — this app drives its
-  `/installtunnelservice` / `/uninstalltunnelservice` CLI, it doesn't bundle or reimplement it
+- Nothing extra — WireGuard itself is bundled (`resources/wireguard-nt/amd64/wireguard.dll`, the
+  official embeddable driver-loading library from wireguard.com/wireguard-nt) and driven directly
+  from the app; there is no separate WireGuard client to install
 - (Optional, for per-app split tunneling) [WinDivert](https://github.com/basil00/WinDivert) — see
   `resources/windivert/README.md`
 
@@ -86,9 +90,10 @@ find anything — that's expected, not a bug.
 ## What's real vs. placeholder
 
 - **Real**: login/entitlement check (same rules as every other Tayyem client — completed
-  account, verified email, `vpn-access` grant), connect/disconnect via the WireGuard tunnel
-  service, destination-based split tunneling, settings persistence, the whole UI.
-- **Experimental**: per-app split tunneling (see table above).
+  account, verified email, `vpn-access` grant), destination-based split tunneling, settings
+  persistence, the whole UI.
+- **Experimental**: the embedded WireGuard connect/disconnect path and per-app split tunneling
+  (see table above) — both are raw FFI into a vendor DLL, unverified on real hardware.
 - **Placeholder only**: the "File Server" sidebar entry is a stub screen with no backend —
   added because it was asked for, not because anything exists to back it yet.
 - **Not wired up**: public IP / location / ISP display on the home screen (shown as a note in

@@ -1,18 +1,20 @@
 use crate::split_tunnel::app_tunnel::AppTunnel;
 use crate::split_tunnel::destination_routes::{self, PhysicalGateway};
 use crate::store::{self, SplitTunnelConfig, WireguardDevice};
+use crate::wireguard_nt::{WgAdapter, WireGuardNt};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use rand_core::OsRng;
 use serde::Deserialize;
-use std::fs;
+use std::net::Ipv4Addr;
 use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use tokio::net::lookup_host;
 use x25519_dalek::{PublicKey, StaticSecret};
 
 const VPN_MANAGER_BASE_URL: &str = "https://api-vpn.tayyem.dev";
-const TUNNEL_NAME: &str = "tayyemvpn";
+const INTERFACE_NAME: &str = "TayyemVPN";
 
 #[cfg(target_os = "windows")]
 const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -39,11 +41,19 @@ struct ApiError {
     error: Option<String>,
 }
 
+/// Holds the loaded driver DLL and the adapter it created — kept alive for the whole time a
+/// tunnel is up, since closing/reconfiguring the adapter requires calling back into the DLL.
+struct ActiveTunnel {
+    nt: WireGuardNt,
+    adapter: WgAdapter,
+}
+
 pub struct WireguardClient {
     status: Mutex<(String, Option<String>)>,
     physical: Mutex<Option<PhysicalGateway>>,
     applied_routes: Mutex<Vec<String>>,
     generation: Mutex<u64>,
+    active: Mutex<Option<ActiveTunnel>>,
 }
 
 impl WireguardClient {
@@ -53,6 +63,7 @@ impl WireguardClient {
             physical: Mutex::new(None),
             applied_routes: Mutex::new(vec![]),
             generation: Mutex::new(0),
+            active: Mutex::new(None),
         }
     }
 
@@ -72,19 +83,13 @@ impl WireguardClient {
         *self.applied_routes.lock().unwrap() = routes;
     }
 
-    fn find_binary() -> Option<PathBuf> {
-        let candidates = [
-            r"C:\Program Files\WireGuard\wireguard.exe",
-            r"C:\Program Files (x86)\WireGuard\wireguard.exe",
-        ];
-        candidates.iter().map(PathBuf::from).find(|p| p.exists())
-    }
-
-    fn config_dir() -> PathBuf {
-        let mut dir = dirs::config_dir().unwrap_or_else(std::env::temp_dir);
-        dir.push("TayyemVPN");
-        fs::create_dir_all(&dir).ok();
-        dir
+    /// Tears down whatever adapter is currently tracked, if any — used both for a normal
+    /// disconnect and to clean up a leftover adapter from a prior crash before reconnecting.
+    fn teardown_active(&self) {
+        if let Some(active) = self.active.lock().unwrap().take() {
+            active.nt.set_adapter_down(&active.adapter);
+            active.nt.close_adapter(active.adapter);
+        }
     }
 
     /// Generates this machine's WireGuard keypair and registers it with vpn_manager. Only ever
@@ -141,24 +146,10 @@ impl WireguardClient {
         })
     }
 
-    fn write_conf(device: &WireguardDevice) -> Result<PathBuf, String> {
-        let contents = format!(
-            "[Interface]\nPrivateKey = {}\nAddress = {}/32\nDNS = {}\n\n[Peer]\nPublicKey = {}\nEndpoint = {}:{}\nAllowedIPs = 0.0.0.0/0\nPersistentKeepalive = 25\n",
-            device.private_key,
-            device.assigned_ip,
-            device.dns,
-            device.server_public_key,
-            device.server_hostname,
-            device.server_listen_port
-        );
-        let path = Self::config_dir().join(format!("{TUNNEL_NAME}.conf"));
-        fs::write(&path, contents).map_err(|e| format!("Could not write WireGuard config: {e}"))?;
-        Ok(path)
-    }
-
     pub async fn connect(
         self: &Arc<Self>,
         access_token: String,
+        resources_dir: PathBuf,
         split_tunnel_config: SplitTunnelConfig,
         app_tunnel: Arc<AppTunnel>,
         emit: impl Fn(&str, serde_json::Value) + Send + Sync + Clone + 'static,
@@ -166,9 +157,6 @@ impl WireguardClient {
         if self.status().0 != "disconnected" {
             return Err("Already connecting or connected".into());
         }
-
-        let binary = Self::find_binary()
-            .ok_or_else(|| "WireGuard is not installed. Install it from wireguard.com/install, then try again.".to_string())?;
 
         let my_generation = {
             let mut gen = self.generation.lock().unwrap();
@@ -179,11 +167,12 @@ impl WireguardClient {
         *self.status.lock().unwrap() = ("connecting".to_string(), None);
         emit("vpn:status", serde_json::json!({ "state": "connecting", "detail": null }));
 
+        // A prior crash could have left an adapter registered without us knowing about it.
+        self.teardown_active();
+
         let physical = match destination_routes::capture_original_gateway() {
             Some(p) => p,
-            None => {
-                return Err(self.fail(my_generation, &emit, "Could not determine your current network gateway".to_string()));
-            }
+            None => return Err(self.fail(my_generation, &emit, "Could not determine your current network gateway".to_string())),
         };
         *self.physical.lock().unwrap() = Some(physical.clone());
 
@@ -200,43 +189,60 @@ impl WireguardClient {
             },
         };
 
-        let conf_path = match Self::write_conf(&device) {
-            Ok(p) => p,
+        let private_key = match decode_key(&device.private_key) {
+            Ok(k) => k,
+            Err(e) => return Err(self.fail(my_generation, &emit, e)),
+        };
+        let peer_public_key = match decode_key(&device.server_public_key) {
+            Ok(k) => k,
+            Err(e) => return Err(self.fail(my_generation, &emit, e)),
+        };
+        let endpoint_ip = match resolve_ipv4(&device.server_hostname).await {
+            Some(ip) => ip,
+            None => return Err(self.fail(my_generation, &emit, format!("Could not resolve {}", device.server_hostname))),
+        };
+
+        let dll_path = resources_dir.join("wireguard-nt").join("amd64").join("wireguard.dll");
+        if !dll_path.exists() {
+            return Err(self.fail(my_generation, &emit, "Missing bundled WireGuard driver — try reinstalling the app.".to_string()));
+        }
+        let nt = match WireGuardNt::load(&dll_path) {
+            Ok(n) => n,
+            Err(e) => return Err(self.fail(my_generation, &emit, e)),
+        };
+        if let Some(version) = nt.driver_version() {
+            emit("vpn:log", serde_json::json!(format!("WireGuard driver loaded (version 0x{version:x})")));
+        }
+
+        emit("vpn:log", serde_json::json!("Creating WireGuard adapter..."));
+        let adapter = match nt.create_adapter(INTERFACE_NAME) {
+            Ok(a) => a,
             Err(e) => return Err(self.fail(my_generation, &emit, e)),
         };
 
-        // A prior crash could have left the service registered without us knowing — clear it
-        // first so /installtunnelservice doesn't fail with "service already exists".
-        let _ = uninstall_service(&binary);
-
-        emit("vpn:log", serde_json::json!(format!("Starting WireGuard tunnel service ({TUNNEL_NAME})...")));
-
-        let mut cmd = Command::new(&binary);
-        cmd.args(["/installtunnelservice", conf_path.to_str().unwrap_or_default()]);
-        #[cfg(target_os = "windows")]
-        {
-            use std::os::windows::process::CommandExt;
-            cmd.creation_flags(CREATE_NO_WINDOW);
+        if let Err(e) = nt.set_configuration(&adapter, private_key, peer_public_key, endpoint_ip.octets(), device.server_listen_port) {
+            nt.close_adapter(adapter);
+            return Err(self.fail(my_generation, &emit, e));
         }
-        let output = match cmd.output() {
-            Ok(o) => o,
-            Err(e) => return Err(self.fail(my_generation, &emit, format!("Failed to start WireGuard: {e}"))),
-        };
-        if !output.status.success() {
-            let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
-            let msg = if detail.is_empty() {
-                "WireGuard service failed to start".to_string()
-            } else {
-                format!("WireGuard service failed to start: {detail}")
-            };
-            return Err(self.fail(my_generation, &emit, msg));
+        if let Err(e) = nt.set_adapter_up(&adapter) {
+            nt.close_adapter(adapter);
+            return Err(self.fail(my_generation, &emit, e));
         }
 
-        emit("vpn:log", serde_json::json!("Tunnel service installed, verifying connectivity..."));
+        emit("vpn:log", serde_json::json!("Configuring interface address, DNS, and routes..."));
+        if let Err(e) = configure_interface(INTERFACE_NAME, &device.assigned_ip, &device.dns) {
+            nt.set_adapter_down(&adapter);
+            nt.close_adapter(adapter);
+            return Err(self.fail(my_generation, &emit, e));
+        }
+
+        *self.active.lock().unwrap() = Some(ActiveTunnel { nt, adapter });
+
+        emit("vpn:log", serde_json::json!("Adapter up, verifying connectivity..."));
 
         let this = self.clone();
         let dns_ip = device.dns.clone();
-        let binary_for_check = binary.clone();
+        let resources_dir_for_apps = resources_dir.clone();
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_secs(2)).await;
             if *this.generation.lock().unwrap() != my_generation {
@@ -250,20 +256,17 @@ impl WireguardClient {
                 let applied = destination_routes::apply(&split_tunnel_config.destinations, &physical).await;
                 this.set_applied_destination_routes(applied);
 
-                let resources_dir = std::env::current_exe()
-                    .ok()
-                    .and_then(|p| p.parent().map(|d| d.join("resources")))
-                    .unwrap_or_else(|| PathBuf::from("resources"));
                 let emit_for_log = emit.clone();
-                app_tunnel.start(split_tunnel_config.apps.clone(), physical.clone(), resources_dir, move |msg| {
+                app_tunnel.start(split_tunnel_config.apps.clone(), physical.clone(), resources_dir_for_apps, move |msg| {
                     emit_for_log("vpn:log", serde_json::json!(msg));
                 });
             } else {
-                let _ = uninstall_service(&binary_for_check);
+                this.teardown_active();
                 this.fail(
                     my_generation,
                     &emit,
-                    "WireGuard service started but the tunnel isn't passing traffic — check your connection and try again.".to_string(),
+                    "WireGuard adapter came up but the tunnel isn't passing traffic — check your connection and try again."
+                        .to_string(),
                 );
             }
         });
@@ -286,22 +289,63 @@ impl WireguardClient {
         }
         destination_routes::clear_all(&self.applied_destination_routes());
         self.set_applied_destination_routes(vec![]);
-        if let Some(binary) = Self::find_binary() {
-            let _ = uninstall_service(&binary);
-        }
+        self.teardown_active();
         *self.status.lock().unwrap() = ("disconnected".to_string(), None);
     }
 }
 
-fn uninstall_service(binary: &PathBuf) -> std::io::Result<std::process::Output> {
-    let mut cmd = Command::new(binary);
-    cmd.args(["/uninstalltunnelservice", TUNNEL_NAME]);
+fn decode_key(b64: &str) -> Result<[u8; 32], String> {
+    let bytes = STANDARD.decode(b64).map_err(|e| format!("Invalid key: {e}"))?;
+    bytes.try_into().map_err(|_| "Invalid key length".to_string())
+}
+
+async fn resolve_ipv4(host: &str) -> Option<Ipv4Addr> {
+    if let Ok(addr) = host.parse::<Ipv4Addr>() {
+        return Some(addr);
+    }
+    let addrs = lookup_host((host, 0)).await.ok()?;
+    for addr in addrs {
+        if let std::net::IpAddr::V4(v4) = addr.ip() {
+            return Some(v4);
+        }
+    }
+    None
+}
+
+fn run_powershell_checked(script: &str) -> Result<(), String> {
+    let mut cmd = Command::new("powershell.exe");
+    cmd.args(["-NoProfile", "-NonInteractive", "-Command", script]);
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
         cmd.creation_flags(CREATE_NO_WINDOW);
     }
-    cmd.output()
+    let output = cmd.output().map_err(|e| format!("Failed to run PowerShell: {e}"))?;
+    if !output.status.success() {
+        let detail = String::from_utf8_lossy(&output.stderr).trim().to_string();
+        return Err(format!("PowerShell command failed: {}", if detail.is_empty() { "unknown error".to_string() } else { detail }));
+    }
+    Ok(())
+}
+
+/// Assigns the tunnel IP, DNS, and a full-tunnel default route to the adapter. The default route
+/// is split into two /1 routes rather than one literal 0.0.0.0/0 — the same trick the official
+/// WireGuard client uses — so it always wins over the existing physical default route regardless
+/// of that route's metric, without creating an ambiguous duplicate 0.0.0.0/0 entry.
+fn configure_interface(name: &str, assigned_ip: &str, dns: &str) -> Result<(), String> {
+    run_powershell_checked(&format!(
+        "New-NetIPAddress -InterfaceAlias '{name}' -IPAddress {assigned_ip} -PrefixLength 32 -ErrorAction Stop | Out-Null"
+    ))?;
+    run_powershell_checked(&format!(
+        "Set-DnsClientServerAddress -InterfaceAlias '{name}' -ServerAddresses ('{dns}') -ErrorAction Stop | Out-Null"
+    ))?;
+    run_powershell_checked(&format!(
+        "New-NetRoute -DestinationPrefix 0.0.0.0/1 -InterfaceAlias '{name}' -NextHop 0.0.0.0 -ErrorAction Stop | Out-Null"
+    ))?;
+    run_powershell_checked(&format!(
+        "New-NetRoute -DestinationPrefix 128.0.0.0/1 -InterfaceAlias '{name}' -NextHop 0.0.0.0 -ErrorAction Stop | Out-Null"
+    ))?;
+    Ok(())
 }
 
 fn ping(ip: &str) -> bool {

@@ -1,6 +1,6 @@
 {
   "name": "tayyem-vpn-desktop",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "TayyemVPN desktop client for Windows — connect/disconnect and split tunneling (per-app and per-destination)",
   "private": true,
   "type": "module",

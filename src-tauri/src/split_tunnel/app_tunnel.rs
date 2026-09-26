@@ -258,9 +258,11 @@ fn refresh_port_pid_map(state: &Arc<Mutex<SharedState>>) {
     state.pid_to_name = pid_to_name;
 }
 
+/// The app names its own WireGuard adapter "TayyemVPN" (see `wireguard.rs`'s `INTERFACE_NAME`),
+/// so this can look it up directly by name rather than guessing from its driver description.
 fn get_vpn_interface_index() -> Option<u32> {
     let stdout = run_powershell(
-        "Get-NetAdapter | Where-Object { $_.InterfaceDescription -match 'Wintun|WireGuard' -and $_.Status -eq 'Up' } | Select-Object -First 1 -ExpandProperty ifIndex",
+        "Get-NetAdapter -Name 'TayyemVPN' -ErrorAction SilentlyContinue | Where-Object { $_.Status -eq 'Up' } | Select-Object -First 1 -ExpandProperty ifIndex",
     )
     .ok()?;
     stdout.trim().parse::<u32>().ok()

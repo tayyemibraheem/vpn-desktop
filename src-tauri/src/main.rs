@@ -4,6 +4,7 @@ mod auth;
 mod split_tunnel;
 mod store;
 mod wireguard;
+mod wireguard_nt;
 
 use split_tunnel::app_tunnel::{list_candidate_apps, AppTunnel, CandidateApp};
 use split_tunnel::destination_routes;
@@ -50,13 +51,17 @@ async fn vpn_connect(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
         None => return Ok(serde_json::json!({ "ok": false, "error": "Not signed in" })),
     };
     let split_tunnel_config = state.data.lock().unwrap().split_tunnel.clone();
+    let resources_dir = app
+        .path()
+        .resource_dir()
+        .unwrap_or_else(|_| std::path::PathBuf::from("resources"));
 
     let wireguard = state.wireguard.clone();
     let app_tunnel = state.app_tunnel.clone();
     let app_for_events = app.clone();
 
     let result = wireguard
-        .connect(access_token, split_tunnel_config, app_tunnel, move |event_name, payload| {
+        .connect(access_token, resources_dir, split_tunnel_config, app_tunnel, move |event_name, payload| {
             let _ = app_for_events.emit(event_name, payload);
         })
         .await;

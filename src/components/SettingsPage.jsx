@@ -52,8 +52,7 @@ export default function SettingsPage({ session, onLogout }) {
         <div className="card side-card" style={{ maxWidth: 420 }}>
           <div className="section-title">About</div>
           <p className="empty-hint" style={{ margin: 0 }}>
-            TayyemVPN requires the official WireGuard client (wireguard.com/install) to be
-            installed separately — this app drives it, it doesn't bundle it.
+            WireGuard is built directly into TayyemVPN — there's nothing else to install.
           </p>
         </div>
       </div>
