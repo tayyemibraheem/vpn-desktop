@@ -244,11 +244,34 @@ impl WireguardClient {
         let dns_ip = device.dns.clone();
         let resources_dir_for_apps = resources_dir.clone();
         tokio::spawn(async move {
-            tokio::time::sleep(Duration::from_secs(2)).await;
-            if *this.generation.lock().unwrap() != my_generation {
-                return; // superseded by a disconnect in the meantime
+            // A few retries over several seconds rather than one fast check — a first-ever
+            // handshake can take a moment, and this is the app's only signal of success.
+            let mut handshake_seen = false;
+            let mut last_stats_log = String::new();
+            for attempt in 0..5 {
+                tokio::time::sleep(Duration::from_secs(if attempt == 0 { 2 } else { 1 })).await;
+                if *this.generation.lock().unwrap() != my_generation {
+                    return; // superseded by a disconnect in the meantime
+                }
+                let stats = this.active.lock().unwrap().as_ref().and_then(|a| a.nt.get_peer_stats(&a.adapter));
+                if let Some(ref s) = stats {
+                    last_stats_log = format!("tx={} rx={} handshake_ns={}", s.tx_bytes, s.rx_bytes, s.last_handshake);
+                    if s.last_handshake != 0 {
+                        handshake_seen = true;
+                        break;
+                    }
+                }
+                if ping(&dns_ip) {
+                    handshake_seen = true;
+                    break;
+                }
             }
-            if ping(&dns_ip) {
+
+            if *this.generation.lock().unwrap() != my_generation {
+                return;
+            }
+
+            if handshake_seen {
                 *this.status.lock().unwrap() = ("connected".to_string(), None);
                 emit("vpn:status", serde_json::json!({ "state": "connected", "detail": null }));
                 emit("vpn:log", serde_json::json!("Connected."));
@@ -261,11 +284,12 @@ impl WireguardClient {
                     emit_for_log("vpn:log", serde_json::json!(msg));
                 });
             } else {
+                emit("vpn:log", serde_json::json!(format!("No handshake after retries ({last_stats_log}).")));
                 this.teardown_active();
                 this.fail(
                     my_generation,
                     &emit,
-                    "WireGuard adapter came up but the tunnel isn't passing traffic — check your connection and try again."
+                    "WireGuard adapter came up but never completed a handshake — check your connection and try again."
                         .to_string(),
                 );
             }

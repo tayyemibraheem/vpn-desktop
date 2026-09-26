@@ -87,6 +87,7 @@ type CreateAdapterFn = unsafe extern "system" fn(*const u16, *const u16, *const 
 type OpenAdapterFn = unsafe extern "system" fn(*const u16) -> *mut c_void;
 type CloseAdapterFn = unsafe extern "system" fn(*mut c_void);
 type SetConfigurationFn = unsafe extern "system" fn(*mut c_void, *const WgInterface, u32) -> i32;
+type GetConfigurationFn = unsafe extern "system" fn(*mut c_void, *mut u8, *mut u32) -> i32;
 type SetAdapterStateFn = unsafe extern "system" fn(*mut c_void, u32) -> i32;
 type GetRunningDriverVersionFn = unsafe extern "system" fn() -> u32;
 
@@ -98,6 +99,7 @@ pub struct WireGuardNt {
     open_adapter: OpenAdapterFn,
     close_adapter: CloseAdapterFn,
     set_configuration: SetConfigurationFn,
+    get_configuration: GetConfigurationFn,
     set_adapter_state: SetAdapterStateFn,
     get_running_driver_version: GetRunningDriverVersionFn,
 }
@@ -127,6 +129,9 @@ impl WireGuardNt {
             let set_configuration: Symbol<SetConfigurationFn> = lib
                 .get(b"WireGuardSetConfiguration\0")
                 .map_err(|e| format!("wireguard.dll missing WireGuardSetConfiguration: {e}"))?;
+            let get_configuration: Symbol<GetConfigurationFn> = lib
+                .get(b"WireGuardGetConfiguration\0")
+                .map_err(|e| format!("wireguard.dll missing WireGuardGetConfiguration: {e}"))?;
             let set_adapter_state: Symbol<SetAdapterStateFn> = lib
                 .get(b"WireGuardSetAdapterState\0")
                 .map_err(|e| format!("wireguard.dll missing WireGuardSetAdapterState: {e}"))?;
@@ -138,6 +143,7 @@ impl WireGuardNt {
             let open_adapter = *open_adapter;
             let close_adapter = *close_adapter;
             let set_configuration = *set_configuration;
+            let get_configuration = *get_configuration;
             let set_adapter_state = *set_adapter_state;
             let get_running_driver_version = *get_running_driver_version;
 
@@ -147,6 +153,7 @@ impl WireGuardNt {
                 open_adapter,
                 close_adapter,
                 set_configuration,
+                get_configuration,
                 set_adapter_state,
                 get_running_driver_version,
             })
@@ -244,6 +251,30 @@ impl WireGuardNt {
     pub fn close_adapter(&self, adapter: WgAdapter) {
         unsafe { (self.close_adapter)(adapter.0) };
     }
+
+    /// Reads back the driver's own view of the first peer's traffic/handshake counters — ground
+    /// truth for whether a handshake has actually happened, independent of (and more reliable
+    /// than) an ICMP ping, which a freshly-created network adapter's firewall profile could block
+    /// even once the tunnel itself is working fine.
+    pub fn get_peer_stats(&self, adapter: &WgAdapter) -> Option<PeerStats> {
+        let expected_size =
+            std::mem::size_of::<WgInterface>() + std::mem::size_of::<WgPeer>() + std::mem::size_of::<WgAllowedIp>();
+        let mut size = expected_size as u32;
+        let mut buf = vec![0u8; size as usize];
+        let ok = unsafe { (self.get_configuration)(adapter.0, buf.as_mut_ptr(), &mut size) };
+        if ok == 0 || buf.len() < std::mem::size_of::<WgInterface>() + std::mem::size_of::<WgPeer>() {
+            return None;
+        }
+        let peer: WgPeer = unsafe { std::ptr::read_unaligned(buf.as_ptr().add(std::mem::size_of::<WgInterface>()) as *const WgPeer) };
+        Some(PeerStats { tx_bytes: peer.tx_bytes, rx_bytes: peer.rx_bytes, last_handshake: peer.last_handshake })
+    }
+}
+
+pub struct PeerStats {
+    pub tx_bytes: u64,
+    pub rx_bytes: u64,
+    /// 100ns intervals since 1601-01-01 UTC, or 0 if no handshake has ever completed.
+    pub last_handshake: u64,
 }
 
 fn struct_bytes<T>(value: &T) -> &[u8] {
