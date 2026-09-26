@@ -221,6 +221,14 @@ impl AmneziaWgClient {
         if !dll_path.exists() {
             return Err(self.fail_and_clear_routes(my_generation, &emit, "Missing bundled AmneziaWG driver — try reinstalling the app.".to_string()));
         }
+        // The Go wintun package hardcodes LOAD_LIBRARY_SEARCH_APPLICATION_DIR when it loads
+        // wintun.dll — that only checks the directory of the running .exe itself, not this
+        // resources subfolder, no matter where Tauri physically installs it. Copying it next to
+        // the .exe on every connect is cheap (a few hundred KB) and keeps this working regardless
+        // of the exact install layout.
+        if let Err(e) = stage_wintun_next_to_exe(&resources_dir) {
+            return Err(self.fail_and_clear_routes(my_generation, &emit, e));
+        }
         let bridge = match AmneziaWgBridge::load(&dll_path) {
             Ok(b) => Arc::new(b),
             Err(e) => return Err(self.fail_and_clear_routes(my_generation, &emit, e)),
@@ -332,6 +340,24 @@ impl AmneziaWgClient {
         self.teardown_active();
         *self.status.lock().unwrap() = ("disconnected".to_string(), None);
     }
+}
+
+fn stage_wintun_next_to_exe(resources_dir: &std::path::Path) -> Result<(), String> {
+    let bundled = resources_dir.join("amneziawg").join("amd64").join("wintun.dll");
+    if !bundled.exists() {
+        return Err("Missing bundled wintun.dll — try reinstalling the app.".to_string());
+    }
+    let exe_dir = std::env::current_exe()
+        .map_err(|e| format!("Could not determine the running executable's path: {e}"))?
+        .parent()
+        .ok_or_else(|| "Could not determine the running executable's directory".to_string())?
+        .to_path_buf();
+    let target = exe_dir.join("wintun.dll");
+    if target.exists() {
+        return Ok(()); // already staged by a previous connect
+    }
+    std::fs::copy(&bundled, &target).map_err(|e| format!("Could not stage wintun.dll next to the app: {e}"))?;
+    Ok(())
 }
 
 /// Builds the UAPI `setconf` string amneziawg-go's `IpcSet` expects: device-level obfuscation
