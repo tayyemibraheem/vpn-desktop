@@ -1,5 +1,6 @@
 import React from 'react';
 import { HomeIcon, ServerIcon, SplitIcon, DeviceIcon, FileServerIcon, SettingsIcon } from './icons.jsx';
+import { api } from '../api.js';
 
 const NAV_ITEMS = [
   { id: 'home', label: 'Home', icon: HomeIcon },
@@ -36,13 +37,19 @@ export default function Sidebar({ page, onNavigate, session }) {
       </nav>
 
       <div className="sidebar-footer">
-        <div className="sidebar-plan">
+        <button
+          type="button"
+          className="sidebar-plan"
+          onClick={() => api.openMyAccount()}
+          title="Open your account page in the browser"
+          style={{ width: '100%', cursor: 'pointer', textAlign: 'left', font: 'inherit', color: 'inherit' }}
+        >
           <span className="dot" />
           <div>
             <div className="label">{session.username}</div>
             <div className="sub">VPN access active</div>
           </div>
-        </div>
+        </button>
       </div>
     </aside>
   );

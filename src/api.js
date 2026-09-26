@@ -1,9 +1,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import { open } from '@tauri-apps/plugin-shell';
+
+const MYACCOUNT_URL = 'https://myaccount.tayyem.dev';
 
 export const api = {
-  login: (usernameOrEmail, password) => invoke('auth_login', { usernameOrEmail, password }),
+  login: (usernameOrEmail, password, remember) => invoke('auth_login', { usernameOrEmail, password, remember }),
   logout: () => invoke('auth_logout'),
+  restoreSession: () => invoke('auth_restore'),
+
+  openMyAccount: (path = '/profile') => open(`${MYACCOUNT_URL}${path}`),
+  openForgotPassword: () => open(`${MYACCOUNT_URL}/forgot-password`),
 
   connect: () => invoke('vpn_connect'),
   disconnect: () => invoke('vpn_disconnect'),

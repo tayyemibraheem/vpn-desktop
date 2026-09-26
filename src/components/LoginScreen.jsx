@@ -5,6 +5,7 @@ import TitleBar from './TitleBar.jsx';
 export default function LoginScreen({ onLoggedIn }) {
   const [usernameOrEmail, setUsernameOrEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [remember, setRemember] = useState(true);
   const [error, setError] = useState(null);
   const [submitting, setSubmitting] = useState(false);
 
@@ -13,7 +14,7 @@ export default function LoginScreen({ onLoggedIn }) {
     setError(null);
     setSubmitting(true);
     try {
-      const result = await api.login(usernameOrEmail, password);
+      const result = await api.login(usernameOrEmail, password, remember);
       if (!result.ok) {
         setError(result.error);
         return;
@@ -39,6 +40,15 @@ export default function LoginScreen({ onLoggedIn }) {
         <div className="field">
           <label>Password</label>
           <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} required />
+        </div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} style={{ width: 'auto' }} />
+            Keep me logged in
+          </label>
+          <button type="button" className="link-button" onClick={() => api.openForgotPassword()}>
+            Forgot password?
+          </button>
         </div>
         {error && <p className="error-text">{error}</p>}
         <button className="btn btn-primary" type="submit" disabled={submitting}>

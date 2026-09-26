@@ -10,12 +10,21 @@ import FileServerPage from './components/FileServerPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
 
 export default function App() {
-  // Always starts signed out (null), never auto-restored from a saved session. The saved access
-  // token is short-lived and there's no refresh flow wired up yet, so restoring it here would
-  // just fail confusingly once it expires — a fresh login always gets a valid one.
   const [session, setSession] = useState(null);
+  const [restoring, setRestoring] = useState(true);
   const [page, setPage] = useState('home');
   const [status, setStatus] = useState({ state: 'disconnected', detail: null });
+
+  // On launch, only a session saved with "keep me logged in" checked comes back here — the
+  // backend transparently refreshes an expired token, or reports not-ok if that also fails.
+  useEffect(() => {
+    api
+      .restoreSession()
+      .then((result) => {
+        if (result?.ok) setSession({ username: result.username, email: result.email });
+      })
+      .finally(() => setRestoring(false));
+  }, []);
 
   useEffect(() => {
     if (!session) return;
@@ -24,6 +33,10 @@ export default function App() {
     api.onStatus((s) => setStatus(s)).then((fn) => (unlisten = fn));
     return () => unlisten && unlisten();
   }, [session]);
+
+  if (restoring) {
+    return <div className="app-shell loading" />;
+  }
 
   if (!session) {
     return <LoginScreen onLoggedIn={setSession} />;

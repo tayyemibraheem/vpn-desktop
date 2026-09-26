@@ -18,8 +18,15 @@ struct AppState {
     app_tunnel: Arc<AppTunnel>,
 }
 
+fn now_ms() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0)
+}
+
 #[tauri::command]
-async fn auth_login(state: State<'_, AppState>, username_or_email: String, password: String) -> Result<serde_json::Value, ()> {
+async fn auth_login(state: State<'_, AppState>, username_or_email: String, password: String, remember: bool) -> Result<serde_json::Value, ()> {
     let outcome = auth::login(&username_or_email, &password).await;
     if outcome.ok {
         let mut data = state.data.lock().unwrap();
@@ -27,6 +34,9 @@ async fn auth_login(state: State<'_, AppState>, username_or_email: String, passw
             access_token: outcome.access_token.clone().unwrap_or_default(),
             refresh_token: outcome.refresh_token.clone().unwrap_or_default(),
             username: outcome.username.clone().unwrap_or_default(),
+            email: outcome.email.clone(),
+            expires_at: now_ms() + outcome.expires_in_seconds.unwrap_or(0) * 1000,
+            remember,
         });
         store::save(&data);
     }
@@ -45,42 +55,103 @@ fn auth_logout(state: State<'_, AppState>) {
     store::save(&data);
 }
 
-fn access_token(state: &State<'_, AppState>) -> Result<String, String> {
-    state
+/// Called once on app startup. Only a session saved with "keep me logged in" checked is eligible;
+/// a still-valid token is reused as-is, an expired one is refreshed transparently, and anything
+/// that fails is treated as signed out rather than surfacing a confusing error at launch.
+#[tauri::command]
+async fn auth_restore(state: State<'_, AppState>) -> Result<serde_json::Value, ()> {
+    let session = state.data.lock().unwrap().session.clone();
+    let session = match session {
+        Some(s) if s.remember => s,
+        _ => return Ok(serde_json::json!({ "ok": false })),
+    };
+
+    if now_ms() < session.expires_at - REFRESH_SKEW_MS {
+        return Ok(serde_json::json!({ "ok": true, "username": session.username, "email": session.email }));
+    }
+
+    match auth::refresh(&session.refresh_token).await {
+        Ok(r) => {
+            let mut data = state.data.lock().unwrap();
+            let username = session.username.clone();
+            let email = session.email.clone();
+            data.session = Some(store::Session {
+                access_token: r.access_token,
+                refresh_token: r.refresh_token,
+                username: username.clone(),
+                email: email.clone(),
+                expires_at: now_ms() + r.expires_in_seconds * 1000,
+                remember: true,
+            });
+            store::save(&data);
+            Ok(serde_json::json!({ "ok": true, "username": username, "email": email }))
+        }
+        Err(_) => {
+            let mut data = state.data.lock().unwrap();
+            data.session = None;
+            store::save(&data);
+            Ok(serde_json::json!({ "ok": false }))
+        }
+    }
+}
+
+const REFRESH_SKEW_MS: i64 = 30_000;
+
+/// The token to use for a vpn_manager/devices call — transparently refreshes first if the
+/// cached one is about to expire, mirroring the website's own getAccessToken() behavior.
+async fn valid_access_token(state: &State<'_, AppState>) -> Result<String, String> {
+    let session = state
         .data
         .lock()
         .unwrap()
         .session
         .clone()
-        .map(|s| s.access_token)
-        .ok_or_else(|| "Not signed in".to_string())
+        .ok_or_else(|| "Not signed in".to_string())?;
+
+    if now_ms() < session.expires_at - REFRESH_SKEW_MS {
+        return Ok(session.access_token);
+    }
+
+    let refreshed = auth::refresh(&session.refresh_token).await.map_err(|_| "Your session expired — please log in again".to_string())?;
+    let mut data = state.data.lock().unwrap();
+    let new_token = refreshed.access_token.clone();
+    data.session = Some(store::Session {
+        access_token: refreshed.access_token,
+        refresh_token: refreshed.refresh_token,
+        username: session.username,
+        email: session.email,
+        expires_at: now_ms() + refreshed.expires_in_seconds * 1000,
+        remember: session.remember,
+    });
+    store::save(&data);
+    Ok(new_token)
 }
 
 #[tauri::command]
 async fn devices_list(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    devices::list_devices(&access_token(&state)?).await
+    devices::list_devices(&valid_access_token(&state).await?).await
 }
 
 #[tauri::command]
 async fn devices_enroll(state: State<'_, AppState>, device_name: String, platform: String) -> Result<serde_json::Value, String> {
-    devices::enroll_device(&access_token(&state)?, &device_name, &platform).await
+    devices::enroll_device(&valid_access_token(&state).await?, &device_name, &platform).await
 }
 
 #[tauri::command]
 async fn devices_revoke(state: State<'_, AppState>, device_id: i64) -> Result<(), String> {
-    devices::revoke_device(&access_token(&state)?, device_id).await
+    devices::revoke_device(&valid_access_token(&state).await?, device_id).await
 }
 
 #[tauri::command]
 async fn subscription_me(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
-    devices::my_subscription(&access_token(&state)?).await
+    devices::my_subscription(&valid_access_token(&state).await?).await
 }
 
 #[tauri::command]
 async fn vpn_connect(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, ()> {
-    let access_token = match state.data.lock().unwrap().session.clone() {
-        Some(s) => s.access_token,
-        None => return Ok(serde_json::json!({ "ok": false, "error": "Not signed in" })),
+    let access_token = match valid_access_token(&state).await {
+        Ok(t) => t,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
     };
     let split_tunnel_config = state.data.lock().unwrap().split_tunnel.clone();
     let resources_dir = app
@@ -102,9 +173,10 @@ async fn vpn_connect(app: tauri::AppHandle, state: State<'_, AppState>) -> Resul
 }
 
 #[tauri::command]
-async fn vpn_disconnect(state: State<'_, AppState>) -> Result<(), ()> {
+async fn vpn_disconnect(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<(), ()> {
     state.wireguard.disconnect().await;
     state.app_tunnel.stop();
+    let _ = app.emit("vpn:status", serde_json::json!({ "state": "disconnected", "detail": null }));
     Ok(())
 }
 
@@ -158,6 +230,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             auth_login,
             auth_logout,
+            auth_restore,
             vpn_connect,
             vpn_disconnect,
             vpn_get_status,

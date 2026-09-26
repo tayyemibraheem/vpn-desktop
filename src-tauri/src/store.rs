@@ -7,6 +7,13 @@ pub struct Session {
     pub access_token: String,
     pub refresh_token: String,
     pub username: String,
+    pub email: Option<String>,
+    /// Unix ms when access_token expires. 0 for a session saved before this field existed —
+    /// treated as already-expired so it refreshes on first use instead of assuming it's valid.
+    pub expires_at: i64,
+    /// Only a session with this set true is restored on the next launch; unchecking "keep me
+    /// logged in" still lets the app work for the current run, it just won't survive a restart.
+    pub remember: bool,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]

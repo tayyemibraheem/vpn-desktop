@@ -25,6 +25,8 @@ struct LoginResponse {
     access_token: String,
     #[serde(rename = "refreshToken")]
     refresh_token: String,
+    #[serde(rename = "expiresInSeconds")]
+    expires_in_seconds: i64,
     user: UserResponse,
 }
 
@@ -41,6 +43,46 @@ pub struct LoginOutcome {
     pub email: Option<String>,
     pub access_token: Option<String>,
     pub refresh_token: Option<String>,
+    pub expires_in_seconds: Option<i64>,
+}
+
+#[derive(Deserialize)]
+struct RefreshResponse {
+    #[serde(rename = "accessToken")]
+    access_token: String,
+    #[serde(rename = "refreshToken")]
+    refresh_token: String,
+    #[serde(rename = "expiresInSeconds")]
+    expires_in_seconds: i64,
+}
+
+pub struct RefreshOutcome {
+    pub access_token: String,
+    pub refresh_token: String,
+    pub expires_in_seconds: i64,
+}
+
+/// tayyem_platform's own refresh endpoint — vpn_manager and every other backend trust this same
+/// token, but only the platform itself knows how to mint a new one.
+pub async fn refresh(refresh_token: &str) -> Result<RefreshOutcome, String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{PLATFORM_BASE_URL}/api/auth/refresh"))
+        .json(&serde_json::json!({ "refreshToken": refresh_token }))
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach the platform: {e}"))?;
+
+    if !resp.status().is_success() {
+        return Err("Session expired".to_string());
+    }
+
+    let body: RefreshResponse = resp.json().await.map_err(|e| format!("Unexpected response from platform: {e}"))?;
+    Ok(RefreshOutcome {
+        access_token: body.access_token,
+        refresh_token: body.refresh_token,
+        expires_in_seconds: body.expires_in_seconds,
+    })
 }
 
 pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
@@ -64,6 +106,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
                 email: None,
                 access_token: None,
                 refresh_token: None,
+                expires_in_seconds: None,
             }
         }
     };
@@ -82,6 +125,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
             email: None,
             access_token: None,
             refresh_token: None,
+            expires_in_seconds: None,
         };
     }
 
@@ -95,6 +139,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
                 email: None,
                 access_token: None,
                 refresh_token: None,
+                expires_in_seconds: None,
             }
         }
     };
@@ -107,6 +152,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
             email: None,
             access_token: None,
             refresh_token: None,
+            expires_in_seconds: None,
         };
     }
     if !body.user.email_verified {
@@ -117,6 +163,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
             email: None,
             access_token: None,
             refresh_token: None,
+            expires_in_seconds: None,
         };
     }
     if !body.user.services.iter().any(|s| s.key == REQUIRED_SERVICE) {
@@ -127,6 +174,7 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
             email: None,
             access_token: None,
             refresh_token: None,
+            expires_in_seconds: None,
         };
     }
 
@@ -137,5 +185,6 @@ pub async fn login(username_or_email: &str, password: &str) -> LoginOutcome {
         email: body.user.email,
         access_token: Some(body.access_token),
         refresh_token: Some(body.refresh_token),
+        expires_in_seconds: Some(body.expires_in_seconds),
     }
 }
