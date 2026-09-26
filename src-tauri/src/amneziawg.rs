@@ -43,9 +43,17 @@ struct AmneziaWgDeviceResponse {
     s1: Option<u16>,
     s2: Option<u16>,
     h1: Option<u32>,
+    #[serde(rename = "h1Hi")]
+    h1_hi: Option<u32>,
     h2: Option<u32>,
+    #[serde(rename = "h2Hi")]
+    h2_hi: Option<u32>,
     h3: Option<u32>,
+    #[serde(rename = "h3Hi")]
+    h3_hi: Option<u32>,
     h4: Option<u32>,
+    #[serde(rename = "h4Hi")]
+    h4_hi: Option<u32>,
 }
 
 #[derive(Deserialize)]
@@ -110,9 +118,13 @@ async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Va
         s1: body.s1.ok_or_else(|| "Server did not return S1".to_string())?,
         s2: body.s2.ok_or_else(|| "Server did not return S2".to_string())?,
         h1: body.h1.ok_or_else(|| "Server did not return H1".to_string())?,
+        h1_hi: body.h1_hi,
         h2: body.h2.ok_or_else(|| "Server did not return H2".to_string())?,
+        h2_hi: body.h2_hi,
         h3: body.h3.ok_or_else(|| "Server did not return H3".to_string())?,
+        h3_hi: body.h3_hi,
         h4: body.h4.ok_or_else(|| "Server did not return H4".to_string())?,
+        h4_hi: body.h4_hi,
     })
 }
 
@@ -388,6 +400,17 @@ fn stage_wintun_next_to_exe(resources_dir: &std::path::Path) -> Result<(), Strin
     Ok(())
 }
 
+/// Formats one H value as a UAPI range string ("lo-hi") when the server gave a high bound, or a
+/// plain number otherwise — matching `device/uapi.go`'s `UintRange.FromString`, which accepts
+/// both. A real range makes the engine pick a fresh random value per packet via `PickOne()`
+/// instead of always sending the same fixed number.
+fn format_h_value(lo: u32, hi: Option<u32>) -> String {
+    match hi {
+        Some(hi) if hi != lo => format!("{lo}-{hi}"),
+        _ => lo.to_string(),
+    }
+}
+
 /// Builds the UAPI `setconf` string amneziawg-go's `IpcSet` expects: device-level obfuscation
 /// params, then one peer block. Keys must be hex, matching `device/uapi.go`'s `FromHex`/
 /// `FromMaybeZeroHex` parsing — base64 (the `.conf`-file convention) is rejected outright.
@@ -409,10 +432,10 @@ fn build_uapi_config(device: &AmneziaWgDevice, endpoint_ip: std::net::Ipv4Addr) 
         jmax = device.jmax,
         s1 = device.s1,
         s2 = device.s2,
-        h1 = device.h1,
-        h2 = device.h2,
-        h3 = device.h3,
-        h4 = device.h4,
+        h1 = format_h_value(device.h1, device.h1_hi),
+        h2 = format_h_value(device.h2, device.h2_hi),
+        h3 = format_h_value(device.h3, device.h3_hi),
+        h4 = format_h_value(device.h4, device.h4_hi),
         port = device.server_listen_port,
     ))
 }

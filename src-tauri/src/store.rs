@@ -44,9 +44,17 @@ pub struct AmneziaWgDevice {
     pub s1: u16,
     pub s2: u16,
     pub h1: u32,
+    /// None collapses H1 to the single fixed value above — always Some in practice for this
+    /// engine, since it's the one client that actually supports real per-packet randomization
+    /// (verified against amneziawg-go's own source); kept optional to mirror the server's schema
+    /// exactly and to degrade gracefully if an older server ever omits it.
+    pub h1_hi: Option<u32>,
     pub h2: u32,
+    pub h2_hi: Option<u32>,
     pub h3: u32,
+    pub h3_hi: Option<u32>,
     pub h4: u32,
+    pub h4_hi: Option<u32>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Default)]
