@@ -22,25 +22,12 @@ pub struct SplitTunnelConfig {
     pub destinations: Vec<String>,
 }
 
-/// This machine's WireGuard identity — generated once on first connect and reused on every
+/// This machine's AmneziaWG identity — generated once on first connect and reused on every
 /// connect after that, the same way a real WireGuard client treats a device's keypair as a
 /// persistent identity rather than something to re-provision every session. Survives logout;
-/// only cleared if the user explicitly forgets this device.
-#[derive(Serialize, Deserialize, Clone)]
-pub struct WireguardDevice {
-    pub device_id: i64,
-    pub private_key: String,
-    pub assigned_ip: String,
-    pub server_hostname: String,
-    pub server_public_key: String,
-    pub server_listen_port: u16,
-    pub dns: String,
-}
-
-/// Same role as `WireguardDevice`, for the AmneziaWG engine — a separate identity/keypair since
-/// the two protocols aren't interchangeable, generated once and reused the same way. The
-/// jc/jmin/jmax/s1/s2/h1-h4 obfuscation parameters and the preshared key come from the server at
-/// registration time rather than being hardcoded here, so they can be rotated without an app update.
+/// only cleared if the user explicitly forgets this device. The jc/jmin/jmax/s1/s2/h1-h4
+/// obfuscation parameters and the preshared key come from the server at registration time rather
+/// than being hardcoded here, so they can be rotated without an app update.
 #[derive(Serialize, Deserialize, Clone)]
 pub struct AmneziaWgDevice {
     pub device_id: i64,
@@ -66,7 +53,6 @@ pub struct AmneziaWgDevice {
 pub struct AppData {
     pub session: Option<Session>,
     pub split_tunnel: SplitTunnelConfig,
-    pub wireguard: Option<WireguardDevice>,
     pub amneziawg: Option<AmneziaWgDevice>,
 }
 

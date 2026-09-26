@@ -34,7 +34,6 @@
     "icon": ["icons/icon.ico"],
     "resources": {
       "../resources/windivert": "windivert",
-      "../resources/wireguard-nt": "wireguard-nt",
       "../resources/amneziawg": "amneziawg"
     },
     "createUpdaterArtifacts": true,

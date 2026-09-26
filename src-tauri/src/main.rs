@@ -7,7 +7,6 @@ mod devices;
 mod split_tunnel;
 mod store;
 mod wireguard;
-mod wireguard_nt;
 
 use split_tunnel::app_tunnel::{list_candidate_apps, AppTunnel, CandidateApp};
 use split_tunnel::destination_routes;
@@ -16,7 +15,7 @@ use tauri::{Emitter, Manager, State};
 
 struct AppState {
     data: Mutex<store::AppData>,
-    wireguard: Arc<wireguard::WireguardClient>,
+    wireguard: Arc<amneziawg::AmneziaWgClient>,
     app_tunnel: Arc<AppTunnel>,
 }
 
@@ -226,7 +225,7 @@ fn main() {
         .plugin(tauri_plugin_process::init())
         .manage(AppState {
             data: Mutex::new(initial_data),
-            wireguard: Arc::new(wireguard::WireguardClient::new()),
+            wireguard: Arc::new(amneziawg::AmneziaWgClient::new()),
             app_tunnel: Arc::new(AppTunnel::new()),
         })
         .invoke_handler(tauri::generate_handler![

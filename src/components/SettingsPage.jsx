@@ -59,7 +59,7 @@ export default function SettingsPage({ session, onLogout }) {
           <div className="section-title">About</div>
           <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>TayyemVPN {version ? `v${version}` : ''}</p>
           <p className="empty-hint" style={{ margin: 0 }}>
-            WireGuard is built directly into TayyemVPN — there's nothing else to install.
+            AmneziaWG is built directly into TayyemVPN — there's nothing else to install.
           </p>
         </div>
       </div>

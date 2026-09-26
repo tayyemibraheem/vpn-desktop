@@ -6,14 +6,115 @@
 use crate::amneziawg_bridge::{base64_key_to_hex, AmneziaWgBridge, AwgTunnel};
 use crate::split_tunnel::app_tunnel::AppTunnel;
 use crate::split_tunnel::destination_routes::{self, PhysicalGateway};
-use crate::store::{AmneziaWgDevice, SplitTunnelConfig};
-use crate::wireguard::{configure_interface, ping, resolve_ipv4};
+use crate::store::{self, AmneziaWgDevice, SplitTunnelConfig};
+use crate::wireguard::{configure_interface, ping, resolve_ipv4, VPN_MANAGER_BASE_URL};
+use base64::{engine::general_purpose::STANDARD, Engine as _};
+use rand_core::OsRng;
+use serde::Deserialize;
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
+use x25519_dalek::{PublicKey, StaticSecret};
 
 const INTERFACE_NAME: &str = "TayyemVPN-AWG";
 const MTU: i32 = 1420;
+
+fn hostname_label() -> String {
+    std::env::var("COMPUTERNAME").unwrap_or_else(|_| "Windows PC".to_string())
+}
+
+#[derive(Deserialize)]
+struct AmneziaWgDeviceResponse {
+    id: i64,
+    #[serde(rename = "assignedIp")]
+    assigned_ip: String,
+    #[serde(rename = "presharedKey")]
+    preshared_key: String,
+    #[serde(rename = "serverHostname")]
+    server_hostname: String,
+    #[serde(rename = "serverPublicKey")]
+    server_public_key: Option<String>,
+    #[serde(rename = "serverListenPort")]
+    server_listen_port: Option<u16>,
+    dns: Option<String>,
+    jc: Option<u16>,
+    jmin: Option<u16>,
+    jmax: Option<u16>,
+    s1: Option<u16>,
+    s2: Option<u16>,
+    h1: Option<u32>,
+    h2: Option<u32>,
+    h3: Option<u32>,
+    h4: Option<u32>,
+}
+
+#[derive(Deserialize)]
+struct ApiError {
+    error: Option<String>,
+}
+
+/// Generates this machine's AmneziaWG keypair and registers it with vpn_manager, mirroring
+/// `wireguard::WireguardClient::register_device` exactly — a separate identity from the
+/// plain-WireGuard one, since the two protocols aren't interchangeable.
+async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Value)) -> Result<AmneziaWgDevice, String> {
+    let secret = StaticSecret::random_from_rng(OsRng);
+    let public = PublicKey::from(&secret);
+    let private_b64 = STANDARD.encode(secret.as_bytes());
+    let public_b64 = STANDARD.encode(public.as_bytes());
+
+    emit("vpn:log", serde_json::json!("Registering this device with the VPN..."));
+
+    let client = reqwest::Client::new();
+    let resp = client
+        .post(format!("{VPN_MANAGER_BASE_URL}/api/devices/register-awg"))
+        .bearer_auth(access_token)
+        .json(&serde_json::json!({
+            "deviceName": hostname_label(),
+            "platform": "WINDOWS",
+            "publicKey": public_b64,
+        }))
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach the VPN service: {e}"))?;
+
+    if !resp.status().is_success() {
+        let message = resp
+            .json::<ApiError>()
+            .await
+            .ok()
+            .and_then(|e| e.error)
+            .unwrap_or_else(|| "Could not register this device".to_string());
+        return Err(message);
+    }
+
+    let body: AmneziaWgDeviceResponse = resp.json().await.map_err(|e| format!("Unexpected response from the VPN service: {e}"))?;
+    let server_public_key = body
+        .server_public_key
+        .ok_or_else(|| "This server has no AmneziaWG key configured yet".to_string())?;
+    let server_listen_port = body
+        .server_listen_port
+        .ok_or_else(|| "This server has no AmneziaWG port configured yet".to_string())?;
+
+    Ok(AmneziaWgDevice {
+        device_id: body.id,
+        private_key: private_b64,
+        preshared_key: body.preshared_key,
+        assigned_ip: body.assigned_ip,
+        server_hostname: body.server_hostname,
+        server_public_key,
+        server_listen_port,
+        dns: body.dns.unwrap_or_else(|| "1.1.1.1,8.8.8.8".to_string()),
+        jc: body.jc.ok_or_else(|| "Server did not return Jc".to_string())?,
+        jmin: body.jmin.ok_or_else(|| "Server did not return Jmin".to_string())?,
+        jmax: body.jmax.ok_or_else(|| "Server did not return Jmax".to_string())?,
+        s1: body.s1.ok_or_else(|| "Server did not return S1".to_string())?,
+        s2: body.s2.ok_or_else(|| "Server did not return S2".to_string())?,
+        h1: body.h1.ok_or_else(|| "Server did not return H1".to_string())?,
+        h2: body.h2.ok_or_else(|| "Server did not return H2".to_string())?,
+        h3: body.h3.ok_or_else(|| "Server did not return H3".to_string())?,
+        h4: body.h4.ok_or_else(|| "Server did not return H4".to_string())?,
+    })
+}
 
 struct ActiveTunnel {
     bridge: Arc<AmneziaWgBridge>,
@@ -43,6 +144,10 @@ impl AmneziaWgClient {
         self.status.lock().unwrap().clone()
     }
 
+    pub fn physical_gateway(&self) -> Option<PhysicalGateway> {
+        self.physical.lock().unwrap().clone()
+    }
+
     pub fn applied_destination_routes(&self) -> Vec<String> {
         self.applied_routes.lock().unwrap().clone()
     }
@@ -59,7 +164,7 @@ impl AmneziaWgClient {
 
     pub async fn connect(
         self: &Arc<Self>,
-        device: AmneziaWgDevice,
+        access_token: String,
         resources_dir: PathBuf,
         split_tunnel_config: SplitTunnelConfig,
         app_tunnel: Arc<AppTunnel>,
@@ -85,6 +190,19 @@ impl AmneziaWgClient {
             None => return Err(self.fail(my_generation, &emit, "Could not determine your current network gateway".to_string())),
         };
         *self.physical.lock().unwrap() = Some(physical.clone());
+
+        let mut data = store::load();
+        let device = match data.amneziawg.clone() {
+            Some(d) => d,
+            None => match register_device(&access_token, &emit).await {
+                Ok(d) => {
+                    data.amneziawg = Some(d.clone());
+                    store::save(&data);
+                    d
+                }
+                Err(e) => return Err(self.fail(my_generation, &emit, e)),
+            },
+        };
 
         let endpoint_ip = match resolve_ipv4(&device.server_hostname).await {
             Some(ip) => ip,

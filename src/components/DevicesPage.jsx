@@ -132,7 +132,7 @@ export default function DevicesPage() {
       <div className="page">
         <div className="page-header">
           <h2>Devices</h2>
-          <p>Add a phone or another computer to your VPN by scanning a QR code — no separate WireGuard app needed.</p>
+          <p>Add a phone or another computer to your VPN by scanning a QR code with the official Amnezia app.</p>
         </div>
 
         {loading && <p className="empty-hint">Loading your devices…</p>}
@@ -236,9 +236,9 @@ export default function DevicesPage() {
         {enrolled && (
           <div className="card" style={{ maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 12, alignItems: 'center' }}>
             <div className="section-title" style={{ alignSelf: 'flex-start' }}>Scan on {enrolled.deviceName}</div>
-            <img src={enrolled.qrDataUrl} alt="WireGuard config QR code" width={220} height={220} style={{ borderRadius: 8 }} />
+            <img src={enrolled.qrDataUrl} alt="AmneziaWG config QR code" width={220} height={220} style={{ borderRadius: 8 }} />
             <p className="empty-hint" style={{ textAlign: 'center' }}>
-              Open the WireGuard app, tap "+" → "Scan from QR code". This config is shown only once — save it now if you need it later.
+              Open the Amnezia app, tap "+" → "Scan from QR code". This config is shown only once — save it now if you need it later.
             </p>
             <div style={{ display: 'flex', gap: 8 }}>
               <button className="btn btn-ghost" onClick={downloadConfig}>Download .conf</button>
