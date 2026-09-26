@@ -1,10 +1,16 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
+import { getVersion } from '@tauri-apps/api/app';
 import TitleBar from './TitleBar.jsx';
 import { checkForUpdate } from '../updater.js';
 
 export default function SettingsPage({ session, onLogout }) {
   const [updateState, setUpdateState] = useState('idle'); // idle | checking | none | error
   const [updateError, setUpdateError] = useState(null);
+  const [version, setVersion] = useState(null);
+
+  useEffect(() => {
+    getVersion().then(setVersion).catch(() => setVersion(null));
+  }, []);
 
   async function onCheckForUpdates() {
     setUpdateState('checking');
@@ -51,6 +57,7 @@ export default function SettingsPage({ session, onLogout }) {
 
         <div className="card side-card" style={{ maxWidth: 420 }}>
           <div className="section-title">About</div>
+          <p style={{ margin: 0, fontSize: 13, fontWeight: 700 }}>TayyemVPN {version ? `v${version}` : ''}</p>
           <p className="empty-hint" style={{ margin: 0 }}>
             WireGuard is built directly into TayyemVPN — there's nothing else to install.
           </p>
