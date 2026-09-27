@@ -77,7 +77,7 @@ export default function DevicesPage() {
     setRequestError(null);
     setRequesting(true);
     try {
-      const result = await api.requestDeviceVerification({ action: 'REVOKE', deviceId: device.id });
+      const result = await api.requestDeviceVerification({ action: 'REVOKE', deviceIds: [device.id] });
       setPending({ action: 'REVOKE', deviceId: device.id, deviceName: device.deviceName, maskedEmail: result.maskedEmail });
       setCode('');
     } catch (err) {
