@@ -1,6 +1,6 @@
 [package]
 name = "tayyem-vpn-desktop"
-version = "0.6.4"
+version = "0.6.5"
 description = "TayyemVPN desktop client"
 edition = "2021"
 
