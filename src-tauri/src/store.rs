@@ -72,12 +72,47 @@ fn config_path() -> PathBuf {
     dir
 }
 
+/// Parses each top-level field independently rather than deserializing straight into `AppData` —
+/// a schema change to just one of these (say, a new required field on `AmneziaWgDevice`) used to
+/// fail the whole-struct parse and silently reset EVERYTHING to defaults, discarding a still-good
+/// session along with the device identity that actually broke. Now a broken field is dropped on
+/// its own (and logged, instead of failing silently) while the rest of the file is still honored.
 pub fn load() -> AppData {
     let path = config_path();
-    match fs::read_to_string(&path) {
-        Ok(contents) => serde_json::from_str(&contents).unwrap_or_default(),
-        Err(_) => AppData::default(),
+    let contents = match fs::read_to_string(&path) {
+        Ok(c) => c,
+        Err(_) => return AppData::default(),
+    };
+    let raw: serde_json::Value = match serde_json::from_str(&contents) {
+        Ok(v) => v,
+        Err(e) => {
+            eprintln!("TayyemVPN: settings.json is not valid JSON ({e}) — starting fresh");
+            return AppData::default();
+        }
+    };
+
+    let mut data = AppData::default();
+    if let Some(v) = raw.get("session") {
+        match serde_json::from_value(v.clone()) {
+            Ok(session) => data.session = session,
+            Err(e) => eprintln!("TayyemVPN: could not read the saved session ({e}) — signing out"),
+        }
     }
+    if let Some(v) = raw.get("split_tunnel") {
+        match serde_json::from_value(v.clone()) {
+            Ok(config) => data.split_tunnel = config,
+            Err(e) => eprintln!("TayyemVPN: could not read the saved split-tunnel config ({e}) — using defaults"),
+        }
+    }
+    if let Some(v) = raw.get("amneziawg") {
+        match serde_json::from_value(v.clone()) {
+            Ok(device) => data.amneziawg = device,
+            Err(e) => eprintln!(
+                "TayyemVPN: could not read this machine's saved VPN device identity ({e}) — it will be re-registered"
+            ),
+        }
+    }
+    data
 }
 
 pub fn save(data: &AppData) {
