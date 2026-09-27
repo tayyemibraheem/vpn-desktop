@@ -7,7 +7,7 @@ const NAV_ITEMS = [
   { id: 'servers', label: 'Servers', icon: ServerIcon },
   { id: 'split', label: 'Split Tunneling', icon: SplitIcon },
   { id: 'devices', label: 'Devices', icon: DeviceIcon },
-  { id: 'files', label: 'File Server', icon: FileServerIcon, badge: 'Soon' },
+  { id: 'files', label: 'Files', icon: FileServerIcon },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 

@@ -26,4 +26,14 @@ export const api = {
   requestDeviceVerification: (body) => invoke('devices_request_verification', { body }),
   confirmDeviceVerification: (code) => invoke('devices_confirm_verification', { code }),
   getSubscription: () => invoke('subscription_me'),
+
+  listFiles: (path) => invoke('files_list', { path }),
+  getFileUsage: () => invoke('files_usage'),
+  createFolder: (path) => invoke('files_create_folder', { path }),
+  deleteFolder: (path) => invoke('files_delete_folder', { path }),
+  deleteFile: (id) => invoke('files_delete', { id }),
+  uploadFile: (path, filename, contentType, dataBase64) =>
+    invoke('files_upload', { path, filename, contentType, dataBase64 }),
+  /** Resolves to a base64 string — the caller decodes it into a Blob to save/preview. */
+  downloadFile: (id) => invoke('files_download', { id }),
 };

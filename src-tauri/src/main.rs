@@ -4,6 +4,7 @@ mod amneziawg;
 mod amneziawg_bridge;
 mod auth;
 mod devices;
+mod files;
 mod split_tunnel;
 mod store;
 mod wireguard;
@@ -149,6 +150,47 @@ async fn subscription_me(state: State<'_, AppState>) -> Result<serde_json::Value
 }
 
 #[tauri::command]
+async fn files_list(state: State<'_, AppState>, path: String) -> Result<serde_json::Value, String> {
+    files::list_folder(&valid_access_token(&state).await?, &path).await
+}
+
+#[tauri::command]
+async fn files_usage(state: State<'_, AppState>) -> Result<serde_json::Value, String> {
+    files::get_usage(&valid_access_token(&state).await?).await
+}
+
+#[tauri::command]
+async fn files_create_folder(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    files::create_folder(&valid_access_token(&state).await?, &path).await
+}
+
+#[tauri::command]
+async fn files_delete_folder(state: State<'_, AppState>, path: String) -> Result<(), String> {
+    files::delete_folder(&valid_access_token(&state).await?, &path).await
+}
+
+#[tauri::command]
+async fn files_delete(state: State<'_, AppState>, id: i64) -> Result<(), String> {
+    files::delete_file(&valid_access_token(&state).await?, id).await
+}
+
+#[tauri::command]
+async fn files_upload(
+    state: State<'_, AppState>,
+    path: String,
+    filename: String,
+    content_type: String,
+    data_base64: String,
+) -> Result<serde_json::Value, String> {
+    files::upload_file(&valid_access_token(&state).await?, &path, &filename, &content_type, &data_base64).await
+}
+
+#[tauri::command]
+async fn files_download(state: State<'_, AppState>, id: i64) -> Result<String, String> {
+    files::download_file(&valid_access_token(&state).await?, id).await
+}
+
+#[tauri::command]
 async fn vpn_connect(app: tauri::AppHandle, state: State<'_, AppState>) -> Result<serde_json::Value, ()> {
     let access_token = match valid_access_token(&state).await {
         Ok(t) => t,
@@ -242,6 +284,13 @@ fn main() {
             devices_request_verification,
             devices_confirm_verification,
             subscription_me,
+            files_list,
+            files_usage,
+            files_create_folder,
+            files_delete_folder,
+            files_delete,
+            files_upload,
+            files_download,
         ])
         .on_window_event(|window, event| {
             // A disconnect on close is not optional — leaving split-tunnel routes or a live

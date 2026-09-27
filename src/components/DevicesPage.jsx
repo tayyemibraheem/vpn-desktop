@@ -20,6 +20,7 @@ export default function DevicesPage() {
   const [subscription, setSubscription] = useState(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(null);
+  const [selected, setSelected] = useState(() => new Set());
 
   const [formOpen, setFormOpen] = useState(false);
   const [deviceName, setDeviceName] = useState('');
@@ -27,7 +28,7 @@ export default function DevicesPage() {
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState(null);
 
-  // { action: 'ENROLL'|'REVOKE', maskedEmail, deviceName, platform?, deviceId? }
+  // { action: 'ENROLL'|'REVOKE', maskedEmail, deviceName, platform?, deviceIds?, deviceNames? }
   const [pending, setPending] = useState(null);
   const [code, setCode] = useState('');
   const [confirming, setConfirming] = useState(false);
@@ -73,12 +74,27 @@ export default function DevicesPage() {
     }
   }
 
-  async function onRequestRevoke(device) {
+  function toggleSelected(id) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAll() {
+    setSelected((prev) => (prev.size === devices.length ? new Set() : new Set(devices.map((d) => d.id))));
+  }
+
+  async function onRequestRevoke(ids) {
+    if (ids.length === 0) return;
     setRequestError(null);
     setRequesting(true);
     try {
-      const result = await api.requestDeviceVerification({ action: 'REVOKE', deviceIds: [device.id] });
-      setPending({ action: 'REVOKE', deviceId: device.id, deviceName: device.deviceName, maskedEmail: result.maskedEmail });
+      const result = await api.requestDeviceVerification({ action: 'REVOKE', deviceIds: ids });
+      const names = devices.filter((d) => ids.includes(d.id)).map((d) => d.deviceName);
+      setPending({ action: 'REVOKE', deviceIds: ids, deviceNames: names, maskedEmail: result.maskedEmail });
       setCode('');
     } catch (err) {
       setRequestError(err?.message || String(err));
@@ -100,6 +116,7 @@ export default function DevicesPage() {
       }
       setPending(null);
       setCode('');
+      setSelected(new Set());
       await refresh();
     } catch (err) {
       setConfirmError(err?.message || String(err));
@@ -147,17 +164,34 @@ export default function DevicesPage() {
             )}
 
             <div className="card" style={{ maxWidth: 460, display: 'flex', flexDirection: 'column', gap: 10 }}>
+              {devices.length > 0 && (
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text-muted)', cursor: 'pointer' }}>
+                    <input type="checkbox" checked={selected.size === devices.length} onChange={toggleSelectAll} />
+                    Select all
+                  </label>
+                  {selected.size > 0 && (
+                    <button className="btn btn-ghost" onClick={() => onRequestRevoke([...selected])} disabled={requesting} style={{ color: 'var(--danger)' }}>
+                      Remove selected ({selected.size})
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="list">
                 {devices.length === 0 && <p className="empty-hint">No devices yet.</p>}
                 {devices.map((d) => (
                   <div className="list-row" key={d.id}>
-                    <div>
-                      <div style={{ fontWeight: 700 }}>{d.deviceName}</div>
-                      <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
-                        {platformLabel(d.platform)} · {d.assignedIp}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <input type="checkbox" checked={selected.has(d.id)} onChange={() => toggleSelected(d.id)} aria-label={`Select ${d.deviceName}`} />
+                      <div>
+                        <div style={{ fontWeight: 700 }}>{d.deviceName}</div>
+                        <div style={{ fontSize: 11.5, color: 'var(--text-faint)' }}>
+                          {platformLabel(d.platform)} · {d.assignedIp}
+                        </div>
                       </div>
                     </div>
-                    <button onClick={() => onRequestRevoke(d)} disabled={requesting} title="Remove">
+                    <button onClick={() => onRequestRevoke([d.id])} disabled={requesting} title="Remove">
                       ×
                     </button>
                   </div>
@@ -202,7 +236,11 @@ export default function DevicesPage() {
         {pending && (
           <div className="card" style={{ maxWidth: 420, display: 'flex', flexDirection: 'column', gap: 12 }}>
             <div className="section-title">
-              {pending.action === 'ENROLL' ? `Confirm adding "${pending.deviceName}"` : `Confirm removing "${pending.deviceName}"`}
+              {pending.action === 'ENROLL'
+                ? `Confirm adding "${pending.deviceName}"`
+                : pending.deviceNames?.length > 1
+                  ? `Confirm removing ${pending.deviceNames.length} devices: ${pending.deviceNames.join(', ')}`
+                  : `Confirm removing "${pending.deviceNames?.[0]}"`}
             </div>
             <p className="empty-hint" style={{ margin: 0 }}>
               We sent a 6-digit code to {pending.maskedEmail}. Enter it below to confirm.
