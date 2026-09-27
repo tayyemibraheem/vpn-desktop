@@ -25,6 +25,7 @@ export default function DevicesPage() {
   const [formOpen, setFormOpen] = useState(false);
   const [deviceName, setDeviceName] = useState('');
   const [platform, setPlatform] = useState('IOS');
+  const [serverId, setServerId] = useState(undefined);
   const [requesting, setRequesting] = useState(false);
   const [requestError, setRequestError] = useState(null);
 
@@ -62,7 +63,7 @@ export default function DevicesPage() {
     setRequesting(true);
     setRequestError(null);
     try {
-      const result = await api.requestDeviceVerification({ action: 'ENROLL', deviceName: name, platform });
+      const result = await api.requestDeviceVerification({ action: 'ENROLL', deviceName: name, platform, serverId });
       setPending({ action: 'ENROLL', deviceName: name, platform, maskedEmail: result.maskedEmail });
       setFormOpen(false);
       setDeviceName('');
@@ -201,7 +202,16 @@ export default function DevicesPage() {
               {requestError && <p className="error-text">{requestError}</p>}
 
               {!formOpen ? (
-                <button className="btn btn-ghost" onClick={() => setFormOpen(true)} disabled={atLimit} style={{ alignSelf: 'flex-start' }}>
+                <button
+                  className="btn btn-ghost"
+                  onClick={() => {
+                    setFormOpen(true);
+                    const current = subscription?.allowedServers?.find((s) => s.name === subscription.serverName);
+                    setServerId(current?.id ?? subscription?.allowedServers?.[0]?.id);
+                  }}
+                  disabled={atLimit}
+                  style={{ alignSelf: 'flex-start' }}
+                >
                   + Add Device
                 </button>
               ) : (
@@ -218,6 +228,16 @@ export default function DevicesPage() {
                       ))}
                     </select>
                   </div>
+                  {subscription?.allowedServers?.length > 1 && (
+                    <div className="field">
+                      <label>Server</label>
+                      <select value={serverId ?? ''} onChange={(e) => setServerId(Number(e.target.value))}>
+                        {subscription.allowedServers.map((s) => (
+                          <option key={s.id} value={s.id}>{s.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
                   <div style={{ display: 'flex', gap: 8 }}>
                     <button className="btn btn-primary" type="submit" disabled={requesting}>
                       {requesting ? 'Sending code…' : 'Send verification code'}
