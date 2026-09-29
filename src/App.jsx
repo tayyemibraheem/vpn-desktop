@@ -6,7 +6,6 @@ import HomePage from './components/HomePage.jsx';
 import ServersPage from './components/ServersPage.jsx';
 import SplitTunnelingPage from './components/SplitTunnelingPage.jsx';
 import DevicesPage from './components/DevicesPage.jsx';
-import FileServerPage from './components/FileServerPage.jsx';
 import SettingsPage from './components/SettingsPage.jsx';
 
 export default function App() {
@@ -47,7 +46,6 @@ export default function App() {
     servers: <ServersPage status={status} />,
     split: <SplitTunnelingPage connected={status.state === 'connected'} />,
     devices: <DevicesPage />,
-    files: <FileServerPage />,
     settings: (
       <SettingsPage
         session={session}

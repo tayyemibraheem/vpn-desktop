@@ -3,13 +3,6 @@ import { api } from '../api.js';
 import TitleBar from './TitleBar.jsx';
 import { PowerIcon } from './icons.jsx';
 
-const QUICK_CONNECT = [
-  { flag: '\u{1F1E9}\u{1F1EA}', name: 'Germany', city: 'Frankfurt', active: true, key: 'eu_server' },
-  { flag: '\u{1F1FA}\u{1F1F8}', name: 'USA', city: 'Coming soon', active: false },
-  { flag: '\u{1F1EC}\u{1F1E7}', name: 'UK', city: 'Coming soon', active: false },
-  { flag: '\u{1F1EF}\u{1F1F5}', name: 'Japan', city: 'Coming soon', active: false },
-];
-
 function formatElapsed(ms) {
   const totalSeconds = Math.floor(ms / 1000);
   const h = String(Math.floor(totalSeconds / 3600)).padStart(2, '0');
@@ -26,6 +19,25 @@ export default function HomePage({ session, status }) {
   const [connectError, setConnectError] = useState(null);
   const [logs, setLogs] = useState([]);
   const [showLogs, setShowLogs] = useState(false);
+
+  const [servers, setServers] = useState([]);
+  const [currentServer, setCurrentServer] = useState(null);
+  const [switchingId, setSwitchingId] = useState(null);
+  const [serverError, setServerError] = useState(null);
+
+  async function refreshServers() {
+    try {
+      const [subscription, current] = await Promise.all([api.getSubscription(), api.getCurrentServer()]);
+      setServers(subscription.allowedServers || []);
+      setCurrentServer(current);
+    } catch (err) {
+      setServerError(err?.message || String(err));
+    }
+  }
+
+  useEffect(() => {
+    refreshServers();
+  }, []);
 
   useEffect(() => {
     let unlisten;
@@ -73,6 +85,21 @@ export default function HomePage({ session, status }) {
     }
   }
 
+  async function onPickServer(server) {
+    if (switchingId || server.id === currentServer?.serverId || status.state === 'connecting') return;
+    setSwitchingId(server.id);
+    setServerError(null);
+    try {
+      const result = await api.setServer(server.id);
+      if (!result?.ok) throw new Error(result?.error || 'Could not switch servers');
+      await refreshServers();
+    } catch (err) {
+      setServerError(err?.message || String(err));
+    } finally {
+      setSwitchingId(null);
+    }
+  }
+
   const ringClass = `status-ring ${status.state}`;
   const stateLabel =
     status.state === 'connected' ? 'Connected' :
@@ -106,10 +133,9 @@ export default function HomePage({ session, status }) {
 
               <div className="server-row">
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
-                  <span className="flag">{'\u{1F1E9}\u{1F1EA}'}</span>
                   <div>
-                    <div className="name">Germany — eu_server</div>
-                    <div className="sub">eu-vpn.tayyem.dev</div>
+                    <div className="name">{currentServer?.serverName || 'No server selected'}</div>
+                    {status.state === 'connected' && <div className="sub">Connected through this server</div>}
                   </div>
                 </div>
               </div>
@@ -130,16 +156,30 @@ export default function HomePage({ session, status }) {
 
             <div className="card" style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
               <div className="side-card">
-                <div className="section-title">Quick Connect</div>
+                <div className="section-title">Servers</div>
               </div>
+              {serverError && <p className="error-text">{serverError}</p>}
+              {servers.length === 0 && !serverError && (
+                <p className="empty-hint" style={{ margin: 0 }}>No servers available on your plan yet.</p>
+              )}
               <div className="quick-connect-grid">
-                {QUICK_CONNECT.map((s) => (
-                  <div key={s.name} className={`quick-connect-item ${s.active ? 'active' : ''}`}>
-                    <span className="flag">{s.flag}</span>
-                    <span className="name">{s.name}</span>
-                    <span className="city">{s.city}</span>
-                  </div>
-                ))}
+                {servers.map((s) => {
+                  const isCurrent = s.id === currentServer?.serverId;
+                  const isSwitching = switchingId === s.id;
+                  return (
+                    <button
+                      key={s.id}
+                      type="button"
+                      onClick={() => onPickServer(s)}
+                      disabled={switchingId != null || status.state === 'connecting'}
+                      className={`quick-connect-item ${isCurrent ? 'active' : ''}`}
+                      style={{ opacity: 1, cursor: isCurrent ? 'default' : 'pointer', font: 'inherit', color: 'inherit' }}
+                    >
+                      <span className="name">{s.name}</span>
+                      <span className="city">{isCurrent ? 'Selected' : isSwitching ? 'Switching…' : 'Tap to use'}</span>
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

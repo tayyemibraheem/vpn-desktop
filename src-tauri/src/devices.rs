@@ -63,6 +63,24 @@ pub async fn confirm_device_verification(access_token: &str, code: &str) -> Resu
     serde_json::from_str(&text).map_err(|e| format!("Unexpected response from the VPN service: {e}"))
 }
 
+/// Self-service opt-in: forward Xbox Live's fixed ports on this device's server straight to its
+/// tunnel IP, kept in sync automatically by vpn_manager afterward. Not tied to the emailed-code
+/// flow above — this can't lock you out of your VPN, so it takes effect immediately.
+pub async fn set_xbox_forward(access_token: &str, device_id: i64, enabled: bool) -> Result<(), String> {
+    let client = reqwest::Client::new();
+    let resp = client
+        .put(format!("{VPN_MANAGER_BASE_URL}/api/devices/{device_id}/xbox-forward"))
+        .bearer_auth(access_token)
+        .json(&serde_json::json!({ "enabled": enabled }))
+        .send()
+        .await
+        .map_err(|e| format!("Could not reach the VPN service: {e}"))?;
+    if !resp.status().is_success() {
+        return Err(error_message(resp, "Could not update the Xbox port forward").await);
+    }
+    Ok(())
+}
+
 pub async fn my_subscription(access_token: &str) -> Result<serde_json::Value, String> {
     let client = reqwest::Client::new();
     let resp = client

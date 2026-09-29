@@ -35,6 +35,9 @@ export default function DevicesPage() {
   const [confirming, setConfirming] = useState(false);
   const [confirmError, setConfirmError] = useState(null);
 
+  const [xboxForwardBusyId, setXboxForwardBusyId] = useState(null);
+  const [xboxForwardError, setXboxForwardError] = useState(null);
+
   const [enrolled, setEnrolled] = useState(null); // { configText, qrDataUrl, deviceName }
 
   async function refresh() {
@@ -86,6 +89,19 @@ export default function DevicesPage() {
 
   function toggleSelectAll() {
     setSelected((prev) => (prev.size === devices.length ? new Set() : new Set(devices.map((d) => d.id))));
+  }
+
+  async function onToggleXboxForward(device) {
+    setXboxForwardBusyId(device.id);
+    setXboxForwardError(null);
+    try {
+      await api.setXboxForward(device.id, !device.xboxForward);
+      await refresh();
+    } catch (err) {
+      setXboxForwardError(err?.message || String(err));
+    } finally {
+      setXboxForwardBusyId(null);
+    }
   }
 
   async function onRequestRevoke(ids) {
@@ -192,13 +208,31 @@ export default function DevicesPage() {
                         </div>
                       </div>
                     </div>
-                    <button onClick={() => onRequestRevoke([d.id])} disabled={requesting} title="Remove">
-                      ×
-                    </button>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                      <button
+                        className="btn btn-ghost"
+                        onClick={() => onToggleXboxForward(d)}
+                        disabled={xboxForwardBusyId != null}
+                        title="Forward Xbox Live's ports on this device's server straight to it"
+                        style={{
+                          height: 30,
+                          padding: '0 10px',
+                          fontSize: 11.5,
+                          borderColor: d.xboxForward ? 'var(--accent)' : undefined,
+                          color: d.xboxForward ? 'var(--text)' : 'var(--text-faint)',
+                        }}
+                      >
+                        {xboxForwardBusyId === d.id ? '…' : d.xboxForward ? 'Xbox forwarding: on' : 'Use for Xbox'}
+                      </button>
+                      <button onClick={() => onRequestRevoke([d.id])} disabled={requesting} title="Remove">
+                        ×
+                      </button>
+                    </div>
                   </div>
                 ))}
               </div>
 
+              {xboxForwardError && <p className="error-text">{xboxForwardError}</p>}
               {requestError && <p className="error-text">{requestError}</p>}
 
               {!formOpen ? (

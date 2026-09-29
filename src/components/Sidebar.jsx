@@ -1,5 +1,5 @@
 import React from 'react';
-import { HomeIcon, ServerIcon, SplitIcon, DeviceIcon, FileServerIcon, SettingsIcon } from './icons.jsx';
+import { HomeIcon, ServerIcon, SplitIcon, DeviceIcon, SettingsIcon } from './icons.jsx';
 import { api } from '../api.js';
 
 const NAV_ITEMS = [
@@ -7,7 +7,6 @@ const NAV_ITEMS = [
   { id: 'servers', label: 'Servers', icon: ServerIcon },
   { id: 'split', label: 'Split Tunneling', icon: SplitIcon },
   { id: 'devices', label: 'Devices', icon: DeviceIcon },
-  { id: 'files', label: 'Files', icon: FileServerIcon },
   { id: 'settings', label: 'Settings', icon: SettingsIcon },
 ];
 
