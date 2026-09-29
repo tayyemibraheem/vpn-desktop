@@ -34,6 +34,14 @@ pub struct AmneziaWgDevice {
     pub private_key: String,
     pub preshared_key: String,
     pub assigned_ip: String,
+    /// Both added when server choice shipped — default to 0/"" for a device identity saved
+    /// before that, so an old settings.json still deserializes instead of forcing a
+    /// re-registration just to learn a display-only label. A 0 id simply won't match anything in
+    /// the Servers page's list until the next successful connect or switch repopulates it for real.
+    #[serde(default)]
+    pub server_id: i64,
+    #[serde(default)]
+    pub server_name: String,
     pub server_hostname: String,
     pub server_public_key: String,
     pub server_listen_port: u16,

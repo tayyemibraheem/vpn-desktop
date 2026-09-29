@@ -15,6 +15,8 @@ export const api = {
   connect: () => invoke('vpn_connect'),
   disconnect: () => invoke('vpn_disconnect'),
   getStatus: () => invoke('vpn_get_status'),
+  getCurrentServer: () => invoke('vpn_get_current_server'),
+  setServer: (serverId) => invoke('vpn_set_server', { serverId }),
   onStatus: (cb) => listen('vpn:status', (event) => cb(event.payload)),
   onLog: (cb) => listen('vpn:log', (event) => cb(event.payload)),
 

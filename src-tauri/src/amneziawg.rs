@@ -30,6 +30,10 @@ struct AmneziaWgDeviceResponse {
     assigned_ip: String,
     #[serde(rename = "presharedKey")]
     preshared_key: String,
+    #[serde(rename = "serverId")]
+    server_id: i64,
+    #[serde(rename = "serverName")]
+    server_name: String,
     #[serde(rename = "serverHostname")]
     server_hostname: String,
     #[serde(rename = "serverPublicKey")]
@@ -64,7 +68,12 @@ struct ApiError {
 /// Generates this machine's AmneziaWG keypair and registers it with vpn_manager, mirroring
 /// `wireguard::WireguardClient::register_device` exactly — a separate identity from the
 /// plain-WireGuard one, since the two protocols aren't interchangeable.
-async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Value)) -> Result<AmneziaWgDevice, String> {
+///
+/// `server_id` is `None` for a first-ever registration (vpn_manager picks the subscriber's
+/// primary server, today's unchanged default) or `Some` when the user deliberately picked a
+/// server from the Servers page — vpn_manager migrates the existing peer to it under the same
+/// device row rather than creating a second one, keyed by device name + platform, not by server.
+async fn register_device(access_token: &str, server_id: Option<i64>, emit: &impl Fn(&str, serde_json::Value)) -> Result<AmneziaWgDevice, String> {
     let secret = StaticSecret::random_from_rng(OsRng);
     let public = PublicKey::from(&secret);
     let private_b64 = STANDARD.encode(secret.as_bytes());
@@ -72,15 +81,20 @@ async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Va
 
     emit("vpn:log", serde_json::json!("Registering this device with the VPN..."));
 
+    let mut body = serde_json::json!({
+        "deviceName": hostname_label(),
+        "platform": "WINDOWS",
+        "publicKey": public_b64,
+    });
+    if let Some(id) = server_id {
+        body["serverId"] = serde_json::json!(id);
+    }
+
     let client = reqwest::Client::new();
     let resp = client
         .post(format!("{VPN_MANAGER_BASE_URL}/api/devices/register-awg"))
         .bearer_auth(access_token)
-        .json(&serde_json::json!({
-            "deviceName": hostname_label(),
-            "platform": "WINDOWS",
-            "publicKey": public_b64,
-        }))
+        .json(&body)
         .send()
         .await
         .map_err(|e| format!("Could not reach the VPN service: {e}"))?;
@@ -108,6 +122,8 @@ async fn register_device(access_token: &str, emit: &impl Fn(&str, serde_json::Va
         private_key: private_b64,
         preshared_key: body.preshared_key,
         assigned_ip: body.assigned_ip,
+        server_id: body.server_id,
+        server_name: body.server_name,
         server_hostname: body.server_hostname,
         server_public_key,
         server_listen_port,
@@ -229,7 +245,7 @@ impl AmneziaWgClient {
         let mut data = store::load();
         let device = match data.amneziawg.clone() {
             Some(d) => d,
-            None => match register_device(&access_token, &emit).await {
+            None => match register_device(&access_token, None, &emit).await {
                 Ok(d) => {
                     data.amneziawg = Some(d.clone());
                     store::save(&data);
@@ -368,6 +384,19 @@ impl AmneziaWgClient {
         destination_routes::clear_all(&self.applied_destination_routes());
         self.set_applied_destination_routes(vec![]);
         self.fail(my_generation, emit, message)
+    }
+
+    /// Re-registers this machine's existing identity onto a different one of the subscriber's
+    /// allowed servers — called from the Servers page, not from Connect. Only talks to
+    /// vpn_manager and updates the locally cached device identity; never touches the network
+    /// adapter itself, so the caller must have already disconnected any live tunnel first (a
+    /// live tunnel is still pointed at the old peer/server's keys and endpoint either way).
+    pub async fn switch_server(&self, access_token: &str, server_id: i64, emit: &impl Fn(&str, serde_json::Value)) -> Result<(), String> {
+        let mut data = store::load();
+        let device = register_device(access_token, Some(server_id), emit).await?;
+        data.amneziawg = Some(device);
+        store::save(&data);
+        Ok(())
     }
 
     pub async fn disconnect(&self) {

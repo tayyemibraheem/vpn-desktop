@@ -229,6 +229,44 @@ fn vpn_get_status(state: State<'_, AppState>) -> serde_json::Value {
     serde_json::json!({ "state": status.0, "detail": status.1 })
 }
 
+/// Which server this machine's own AmneziaWG identity is currently registered on — read straight
+/// from disk (not `state.data`) to match how `connect`/`switch_server` themselves persist it,
+/// rather than trusting `state.data`'s in-memory copy, which nothing here keeps in sync with it.
+/// Null means never registered yet (first Connect click will pick the account's primary server).
+#[tauri::command]
+fn vpn_get_current_server() -> serde_json::Value {
+    match store::load().amneziawg {
+        Some(d) if d.server_id != 0 => serde_json::json!({ "serverId": d.server_id, "serverName": d.server_name }),
+        _ => serde_json::Value::Null,
+    }
+}
+
+/// Switches this machine's own VPN connection to a different one of the subscriber's allowed
+/// servers. Disconnects first if a tunnel is currently up — a live tunnel's adapter is configured
+/// with the old server's keys and endpoint, so there's no such thing as switching without at
+/// least a brief drop; the user reconnects manually afterward, same as picking a new server on
+/// most VPN clients.
+#[tauri::command]
+async fn vpn_set_server(app: tauri::AppHandle, state: State<'_, AppState>, server_id: i64) -> Result<serde_json::Value, ()> {
+    let access_token = match valid_access_token(&state).await {
+        Ok(t) => t,
+        Err(e) => return Ok(serde_json::json!({ "ok": false, "error": e })),
+    };
+
+    if state.wireguard.status().0 != "disconnected" {
+        state.wireguard.disconnect().await;
+        state.app_tunnel.stop();
+        let _ = app.emit("vpn:status", serde_json::json!({ "state": "disconnected", "detail": null }));
+    }
+
+    let app_for_events = app.clone();
+    let emit = move |event_name: &str, payload: serde_json::Value| {
+        let _ = app_for_events.emit(event_name, payload);
+    };
+    let result = state.wireguard.switch_server(&access_token, server_id, &emit).await;
+    Ok(serde_json::json!({ "ok": result.is_ok(), "error": result.err() }))
+}
+
 #[tauri::command]
 fn split_tunnel_get_config(state: State<'_, AppState>) -> store::SplitTunnelConfig {
     state.data.lock().unwrap().split_tunnel.clone()
@@ -277,6 +315,8 @@ fn main() {
             vpn_connect,
             vpn_disconnect,
             vpn_get_status,
+            vpn_get_current_server,
+            vpn_set_server,
             split_tunnel_get_config,
             split_tunnel_set_config,
             split_tunnel_list_candidate_apps,
