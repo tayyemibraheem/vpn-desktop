@@ -26,9 +26,10 @@ fn now_ms() -> i64 {
         .unwrap_or(0)
 }
 
-#[tauri::command]
-async fn auth_login(state: State<'_, AppState>, username_or_email: String, password: String, remember: bool) -> Result<serde_json::Value, ()> {
-    let outcome = auth::login(&username_or_email, &password).await;
+/// Builds the Tauri response for either a completed login or an MFA challenge, and — only on a
+/// completed login — persists the session the same way for either path (fresh password login or
+/// the second MFA step). Shared by `auth_login`, `auth_verify_mfa`.
+fn finish_login(state: &State<'_, AppState>, outcome: auth::LoginOutcome, remember: bool) -> serde_json::Value {
     if outcome.ok {
         let mut data = state.data.lock().unwrap();
         data.session = Some(store::Session {
@@ -41,12 +42,37 @@ async fn auth_login(state: State<'_, AppState>, username_or_email: String, passw
         });
         store::save(&data);
     }
-    Ok(serde_json::json!({
+    serde_json::json!({
         "ok": outcome.ok,
         "error": outcome.error,
         "username": outcome.username,
         "email": outcome.email,
-    }))
+        "mfaRequired": outcome.mfa_required,
+        "mfaChallengeToken": outcome.mfa_challenge_token,
+        "mfaMethods": outcome.mfa_methods,
+    })
+}
+
+#[tauri::command]
+async fn auth_login(state: State<'_, AppState>, username_or_email: String, password: String, remember: bool) -> Result<serde_json::Value, ()> {
+    let outcome = auth::login(&username_or_email, &password).await;
+    Ok(finish_login(&state, outcome, remember))
+}
+
+/// The second step of login once `auth_login` came back with `mfaRequired: true`.
+#[tauri::command]
+async fn auth_verify_mfa(state: State<'_, AppState>, challenge_token: String, method: String, code: String, remember: bool) -> Result<serde_json::Value, ()> {
+    let outcome = auth::verify_mfa_login(&challenge_token, &method, &code).await;
+    Ok(finish_login(&state, outcome, remember))
+}
+
+/// Only needed if the chosen method is EMAIL — TOTP/PIN need nothing sent first.
+#[tauri::command]
+async fn auth_send_mfa_email_code(challenge_token: String) -> Result<serde_json::Value, ()> {
+    match auth::send_mfa_login_email_code(&challenge_token).await {
+        Ok(()) => Ok(serde_json::json!({ "ok": true, "error": null })),
+        Err(message) => Ok(serde_json::json!({ "ok": false, "error": message })),
+    }
 }
 
 #[tauri::command]
@@ -273,6 +299,8 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             auth_login,
+            auth_verify_mfa,
+            auth_send_mfa_email_code,
             auth_logout,
             auth_restore,
             vpn_connect,

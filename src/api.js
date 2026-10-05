@@ -6,6 +6,9 @@ const MYACCOUNT_URL = 'https://myaccount.tayyem.dev';
 
 export const api = {
   login: (usernameOrEmail, password, remember) => invoke('auth_login', { usernameOrEmail, password, remember }),
+  verifyMfa: (challengeToken, method, code, remember) =>
+    invoke('auth_verify_mfa', { challengeToken, method, code, remember }),
+  sendMfaEmailCode: (challengeToken) => invoke('auth_send_mfa_email_code', { challengeToken }),
   logout: () => invoke('auth_logout'),
   restoreSession: () => invoke('auth_restore'),
 
